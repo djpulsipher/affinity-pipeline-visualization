@@ -1278,4 +1278,186 @@ body {
 
 .last-contact.warning {
     color: #ffc107;
+}
+
+/* Lead Weight Modal Styles */
+.lead-weight-form {
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.lead-weight-form .form-group {
+    margin-bottom: 20px;
+}
+
+.lead-weight-form label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.lead-weight-form input[type="range"] {
+    width: 100%;
+    margin-right: 10px;
+    height: 6px;
+    border-radius: 3px;
+    background: #e1e8ed;
+    outline: none;
+    -webkit-appearance: none;
+}
+
+.lead-weight-form input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #667eea;
+    cursor: pointer;
+}
+
+.lead-weight-form input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #667eea;
+    cursor: pointer;
+    border: none;
+}
+
+.lead-weight-form textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 12px;
+    border: 2px solid #e1e8ed;
+    border-radius: 8px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 14px;
+    transition: border-color 0.3s ease;
+}
+
+.lead-weight-form textarea:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.weight-preview {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+    border: 1px solid #e1e8ed;
+}
+
+.weight-preview p {
+    margin: 8px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.weight-preview strong {
+    color: #2c3e50;
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.button-group .btn {
+    padding: 10px 20px;
+    font-size: 14px;
+}
+
+/* Lead Weight Controls */
+.lead-weight-controls {
+    margin-top: 10px;
+}
+
+.btn-weight {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.btn-weight:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.btn-weight i {
+    font-size: 10px;
+}
+
+/* Lead Weight Display */
+.lead-weighted-value {
+    color: #28a745;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.lead-type {
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.lead-contact {
+    color: #007bff;
+    font-size: 0.9em;
+}
+
+.lead-age {
+    color: #fd7e14;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+/* Individual Weight Display */
+.lead-item strong {
+    color: #667eea;
+}
+
+/* Weight Slider Value Display */
+#leadWeightValue {
+    font-weight: bold;
+    color: #667eea;
+    font-size: 16px;
+    margin-left: 10px;
+}
+
+/* Notification Animations */
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
 } 

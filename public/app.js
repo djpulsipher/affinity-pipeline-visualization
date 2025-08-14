@@ -6,6 +6,7 @@ let stageWeights = {};
 let excludedStages = new Set(); // New: Track excluded stages
 let stageOrder = []; // New: Track custom stage order
 let isReorderMode = false; // New: Track reorder mode
+let individualLeadWeights = {}; // New: Track individual lead weights
 let defaultSettings = {
     defaultStageField: '',
     defaultStageValue: '',
@@ -38,6 +39,9 @@ function initializeApp() {
     if (savedApiKey) {
         document.getElementById('apiKey').value = savedApiKey;
     }
+    
+    // Load individual lead weights
+    loadIndividualLeadWeights();
 
     // Add event listeners with null checks
     const saveApiKeyBtn = document.getElementById('saveApiKey');
@@ -976,8 +980,12 @@ function createDetailedView() {
                             <span class="value">${lead.lastContact ? formatLastContact(lead.lastContact) : 'N/A'}</span>
                         </span>
                         <span>
-                            <span class="label">Weighted Value:</span>
-                            <span class="value">$${formatCurrency(lead.value * (stageWeights[lead.stage] || 1))}</span>
+                            <span class="label">Individual Weight:</span>
+                            <span class="value">${getIndividualLeadWeight(lead.id)}x</span>
+                        </span>
+                        <span>
+                            <span class="label">Total Weighted Value:</span>
+                            <span class="value">$${formatCurrency(calculateLeadWeightedValue(lead))}</span>
                         </span>
 
                     </div>
@@ -1017,7 +1025,7 @@ function updateSummaryStats() {
         if (excludedStages.has(lead.stage)) {
             return sum;
         }
-        return sum + (lead.value * (stageWeights[lead.stage] || 1));
+        return sum + calculateLeadWeightedValue(lead);
     }, 0);
     
     // Calculate average contact days for entire list
@@ -1061,6 +1069,17 @@ function updateSummaryStats() {
             stageAgeInfo += `${stage}: ${age} days<br/>`;
         });
         stageAgeElement.innerHTML = stageAgeInfo;
+    }
+    
+    // Add custom weights summary if element exists
+    const customWeightsElement = document.getElementById('customWeights');
+    if (customWeightsElement) {
+        const customWeightsCount = Object.keys(individualLeadWeights).length;
+        if (customWeightsCount > 0) {
+            customWeightsElement.innerHTML = `<strong>Custom Weights:</strong> ${customWeightsCount} lead${customWeightsCount !== 1 ? 's' : ''} with individual weights`;
+        } else {
+            customWeightsElement.innerHTML = '<strong>Custom Weights:</strong> No individual weights set';
+        }
     }
 }
 
@@ -1129,16 +1148,26 @@ function showStageDetails(stageData) {
                     `<span class="last-contact" style="color: ${urgencyColor}; font-weight: bold;">Last Contact: ${formatLastContact(lead.lastContact)}</span>` :
                     `<span class="last-contact" style="color: ${urgencyColor};">No contact info</span>`;
                 
+                const individualWeight = getIndividualLeadWeight(lead.id);
+                const weightedValue = calculateLeadWeightedValue(lead);
+                const weightDisplay = individualWeight !== 1 ? ` (${individualWeight}x)` : '';
+                
                 return `
                     <div class="lead-item">
-                        <strong>${lead.entity?.name || `Lead ${lead.id}`}</strong>
+                        <strong>${lead.entity?.name || `Lead ${lead.id}`}${weightDisplay}</strong>
                         <div class="lead-details">
                             <span class="lead-value">$${formatCurrency(lead.value)}</span>
+                            <span class="lead-weighted-value">Weighted: $${formatCurrency(weightedValue)}</span>
                             ${lead.source ? `<span class="lead-source">Source: ${lead.source}</span>` : ''}
                             ${lead.contactDirection ? `<span class="lead-contact">Contact: ${lead.contactDirection}</span>` : ''}
                             ${lead.contactType ? `<span class="lead-type">Type: ${lead.contactType}</span>` : ''}
                             ${lead.leadAge !== null ? `<span class="lead-age">Age: ${lead.leadAge} days</span>` : ''}
                             ${lastContactInfo}
+                            <div class="lead-weight-controls">
+                                <button onclick="showLeadWeightModal('${lead.id}', '${lead.entity?.name || `Lead ${lead.id}`}', ${individualWeight})" class="btn-weight">
+                                    <i class="fas fa-sliders-h"></i> Adjust Weight
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -1164,7 +1193,9 @@ function showLeadDetails(lead) {
         <div class="lead-detail-stats">
             <p><strong>Stage:</strong> ${lead.stage}</p>
             <p><strong>Value:</strong> $${formatCurrency(lead.value)}</p>
-            <p><strong>Weighted Value:</strong> $${formatCurrency(lead.value * (stageWeights[lead.stage] || 1))}</p>
+            <p><strong>Stage Weight:</strong> ${stageWeights[lead.stage] || 1}x</p>
+            <p><strong>Individual Weight:</strong> ${getIndividualLeadWeight(lead.id)}x</p>
+            <p><strong>Total Weighted Value:</strong> $${formatCurrency(calculateLeadWeightedValue(lead))}</p>
             ${lead.source ? `<p><strong>Source:</strong> ${lead.source}</p>` : ''}
             ${lead.contactDirection ? `<p><strong>Contact Direction:</strong> ${lead.contactDirection}</p>` : ''}
             ${lead.contactType ? `<p><strong>Contact Type:</strong> ${lead.contactType}</p>` : ''}
@@ -1180,6 +1211,15 @@ function showLeadDetails(lead) {
             </div>
             <div class="field-item">
                 <strong>Value:</strong> $${formatCurrency(lead.value)}
+            </div>
+            <div class="field-item">
+                <strong>Stage Weight:</strong> ${stageWeights[lead.stage] || 1}x
+            </div>
+            <div class="field-item">
+                <strong>Individual Weight:</strong> ${getIndividualLeadWeight(lead.id)}x
+            </div>
+            <div class="field-item">
+                <strong>Total Weighted Value:</strong> $${formatCurrency(calculateLeadWeightedValue(lead))}
             </div>
             ${lead.source ? `<div class="field-item"><strong>Source:</strong> ${lead.source}</div>` : ''}
             ${lead.contactDirection ? `<div class="field-item"><strong>Contact Direction:</strong> ${lead.contactDirection}</div>` : ''}
@@ -1202,15 +1242,19 @@ function showTooltip(event, lead) {
         .duration(200)
         .style('opacity', 1);
     
+    const individualWeight = getIndividualLeadWeight(lead.id);
+    const weightedValue = calculateLeadWeightedValue(lead);
+    const weightDisplay = individualWeight !== 1 ? ` (${individualWeight}x)` : '';
+    
     tooltip.html(`
-        <strong>${lead.entity?.name || `Lead ${lead.id}`}</strong><br/>
+        <strong>${lead.entity?.name || `Lead ${lead.id}`}${weightDisplay}</strong><br/>
         Stage: ${lead.stage}<br/>
         Value: $${formatCurrency(lead.value)}<br/>
         ${lead.source ? `Source: ${lead.source}<br/>` : ''}
         ${lead.contactDirection ? `Contact: ${lead.contactDirection}<br/>` : ''}
         ${lead.contactType ? `Type: ${lead.contactType}<br/>` : ''}
         ${lead.leadAge !== null ? `Age: ${lead.leadAge} days<br/>` : ''}
-        Weighted: $${formatCurrency(lead.value * (stageWeights[lead.stage] || 1))}
+        Weighted: $${formatCurrency(weightedValue)}
     `)
     .style('left', (event.pageX + 10) + 'px')
     .style('top', (event.pageY - 10) + 'px');
@@ -2490,6 +2534,183 @@ function calculateStageAges(leads) {
     });
     
     return stageAges;
+}
+
+// Individual Lead Weight Management Functions
+function setIndividualLeadWeight(leadId, weight) {
+    individualLeadWeights[leadId] = parseFloat(weight);
+    saveIndividualLeadWeights();
+    updateVisualization();
+    updateSummaryStats();
+}
+
+function getIndividualLeadWeight(leadId) {
+    return individualLeadWeights[leadId] || 1;
+}
+
+function resetIndividualLeadWeight(leadId) {
+    delete individualLeadWeights[leadId];
+    saveIndividualLeadWeights();
+    updateVisualization();
+    updateSummaryStats();
+}
+
+function saveIndividualLeadWeights() {
+    localStorage.setItem('individualLeadWeights', JSON.stringify(individualLeadWeights));
+}
+
+function loadIndividualLeadWeights() {
+    const saved = localStorage.getItem('individualLeadWeights');
+    if (saved) {
+        individualLeadWeights = JSON.parse(saved);
+    }
+}
+
+function calculateLeadWeightedValue(lead) {
+    const stageWeight = stageWeights[lead.stage] || 1;
+    const individualWeight = getIndividualLeadWeight(lead.id);
+    return lead.value * stageWeight * individualWeight;
+}
+
+// Lead Weight Modal Functions
+let currentLeadWeightData = null;
+
+function showLeadWeightModal(leadId, leadName, currentWeight) {
+    const modal = document.getElementById('leadWeightModal');
+    const lead = currentData.leads.find(l => l.id == leadId);
+    
+    if (!lead) return;
+    
+    currentLeadWeightData = { leadId, leadName, currentWeight };
+    
+    // Set modal content
+    document.getElementById('leadWeightModalName').textContent = leadName;
+    document.getElementById('leadWeightSlider').value = currentWeight;
+    document.getElementById('leadWeightValue').textContent = currentWeight + 'x';
+    
+    // Update preview
+    updateLeadWeightPreview(lead, currentWeight);
+    
+    // Add event listeners
+    const slider = document.getElementById('leadWeightSlider');
+    slider.oninput = function() {
+        const weight = parseFloat(this.value);
+        document.getElementById('leadWeightValue').textContent = weight + 'x';
+        updateLeadWeightPreview(lead, weight);
+    };
+    
+    // Button event listeners
+    document.getElementById('saveLeadWeight').onclick = () => saveLeadWeight();
+    document.getElementById('resetLeadWeight').onclick = () => resetLeadWeight();
+    document.getElementById('cancelLeadWeight').onclick = () => closeLeadWeightModal();
+    
+    modal.classList.remove('hidden');
+}
+
+function updateLeadWeightPreview(lead, individualWeight) {
+    const baseValue = lead.value;
+    const stageWeight = stageWeights[lead.stage] || 1;
+    const totalValue = baseValue * stageWeight * individualWeight;
+    
+    document.getElementById('leadWeightBaseValue').textContent = formatCurrency(baseValue);
+    document.getElementById('leadWeightStageWeight').textContent = stageWeight + 'x';
+    document.getElementById('leadWeightIndividualWeight').textContent = individualWeight + 'x';
+    document.getElementById('leadWeightTotalValue').textContent = formatCurrency(totalValue);
+}
+
+function saveLeadWeight() {
+    if (!currentLeadWeightData) return;
+    
+    const weight = parseFloat(document.getElementById('leadWeightSlider').value);
+    const reason = document.getElementById('leadWeightReason').value;
+    
+    setIndividualLeadWeight(currentLeadWeightData.leadId, weight);
+    
+    // Save reason if provided
+    if (reason.trim()) {
+        const reasons = JSON.parse(localStorage.getItem('leadWeightReasons') || '{}');
+        reasons[currentLeadWeightData.leadId] = reason;
+        localStorage.setItem('leadWeightReasons', JSON.stringify(reasons));
+    }
+    
+    showNotification(`Weight updated for ${currentLeadWeightData.leadName}`, 'success');
+    closeLeadWeightModal();
+}
+
+function resetLeadWeight() {
+    if (!currentLeadWeightData) return;
+    
+    resetIndividualLeadWeight(currentLeadWeightData.leadId);
+    
+    // Remove reason
+    const reasons = JSON.parse(localStorage.getItem('leadWeightReasons') || '{}');
+    delete reasons[currentLeadWeightData.leadId];
+    localStorage.setItem('leadWeightReasons', JSON.stringify(reasons));
+    
+    showNotification(`Weight reset for ${currentLeadWeightData.leadName}`, 'info');
+    closeLeadWeightModal();
+}
+
+function closeLeadWeightModal() {
+    const modal = document.getElementById('leadWeightModal');
+    modal.classList.add('hidden');
+    currentLeadWeightData = null;
+    
+    // Clear form
+    document.getElementById('leadWeightReason').value = '';
+    document.getElementById('leadWeightSlider').value = 1;
+    document.getElementById('leadWeightValue').textContent = '1x';
+}
+
+// Notification function for weight updates
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    
+    // Style the notification
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        font-weight: 500;
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+        max-width: 300px;
+    `;
+    
+    // Set background color based on type
+    switch(type) {
+        case 'success':
+            notification.style.backgroundColor = '#28a745';
+            break;
+        case 'error':
+            notification.style.backgroundColor = '#dc3545';
+            break;
+        case 'warning':
+            notification.style.backgroundColor = '#ffc107';
+            notification.style.color = '#212529';
+            break;
+        default:
+            notification.style.backgroundColor = '#007bff';
+    }
+    
+    // Add to page
+    document.body.appendChild(notification);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
 }
 
  

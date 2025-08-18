@@ -158,14 +158,19 @@
                         <span id="weightedValue" class="stat-value">$0</span>
                     </div>
                     <div class="stat">
-                        <span id="contactInfo" class="stat-value">No contact data</span>
+                        <span class="stat-label">Avg Days Since Last Contact:</span>
+                        <span id="averageContact" class="stat-value">No contact data</span>
                     </div>
-                                <div class="stat">
-                <span id="stageAges" class="stat-value">No age data</span>
-            </div>
-            <div class="stat">
-                <span id="customWeights" class="stat-value">No custom weights</span>
-            </div>
+                </div>
+                
+                <!-- Stage Metrics Table -->
+                <div class="stage-metrics-container">
+                    <div id="stageAges" class="stage-metrics-content">
+                        <p>No stage data available</p>
+                    </div>
+                </div>
+                
+                <!-- Contact urgency legend removed -->
                 </div>
             </div>
 
@@ -217,6 +222,36 @@
             </div>
 
 
+
+            <!-- Pipeline Change Tracking -->
+            <div class="pipeline-changes-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-history"></i> Pipeline Changes</h3>
+                    <div class="change-controls">
+                        <button id="refreshDataForTracking" class="btn btn-primary" onclick="refreshDataForTracking()">
+                            <i class="fas fa-sync-alt"></i> Refresh & Track
+                        </button>
+                        <button id="toggleAutoRefresh" class="btn btn-outline" onclick="toggleAutoRefresh()">
+                            <i class="fas fa-clock"></i> Auto Refresh
+                        </button>
+                        <button id="toggleChangeTracking" class="btn btn-warning" onclick="toggleChangeTracking()">
+                            Disable Tracking
+                        </button>
+                        <button id="clearChangeHistory" class="btn btn-outline" onclick="clearChangeHistory()">
+                            <i class="fas fa-trash"></i> Clear History
+                        </button>
+                        <button id="clearStorage" class="btn btn-outline" onclick="clearStorage()" title="Clear localStorage if experiencing storage issues">
+                            <i class="fas fa-database"></i> Clear Storage
+                        </button>
+                        <button id="searchHistoricalChanges" class="btn btn-outline" onclick="showHistoricalSearchModal()">
+                            <i class="fas fa-search"></i> Search History
+                        </button>
+                    </div>
+                </div>
+                <div id="changeHistoryContainer" class="change-history">
+                    <div class="no-changes">No pipeline changes recorded yet.</div>
+                </div>
+            </div>
 
             <!-- Detailed View -->
             <div id="detailedView" class="detailed-view hidden">
@@ -310,6 +345,53 @@
                     <button type="submit" id="saveRule" class="btn btn-primary">Save Rule</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Historical Search Modal -->
+    <div id="historicalSearchModal" class="modal hidden">
+        <div class="modal-content large-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-search"></i> Search Historical Changes</h3>
+                <button class="close-btn" onclick="closeHistoricalSearchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                                    <div class="search-controls">
+                        <div class="date-range">
+                            <label for="startDate">Start Date:</label>
+                            <input type="date" id="startDate" required>
+                            
+                            <label for="endDate">End Date:</label>
+                            <input type="date" id="endDate" required>
+                        </div>
+                        <div class="field-selection">
+                            <label for="stageFieldSelect">Stage Field:</label>
+                            <select id="stageFieldSelect">
+                                <option value="">Auto-detect stage field</option>
+                            </select>
+                        </div>
+                        <div class="search-options">
+                            <label>
+                                <input type="checkbox" id="includeNewLeads" checked> Include New Leads
+                            </label>
+                            <label>
+                                <input type="checkbox" id="includeStageChanges" checked> Include Stage Changes
+                            </label>
+                            <label>
+                                <input type="checkbox" id="includeRemovedLeads" checked> Include Removed Leads
+                            </label>
+                        </div>
+                        <button onclick="searchHistoricalChanges()" class="btn btn-primary">
+                            <i class="fas fa-search"></i> Search Changes
+                        </button>
+                        <button onclick="showAvailableSnapshots()" class="btn btn-outline">
+                            <i class="fas fa-info-circle"></i> Show Available Data
+                        </button>
+                    </div>
+                <div id="historicalResults" class="historical-results">
+                    <p class="search-placeholder">Select a date range and click "Search Changes" to view historical pipeline changes.</p>
+                </div>
+            </div>
         </div>
     </div>
 

@@ -117,6 +117,96 @@ app.get('/api/field-values', async (req, res) => {
   }
 });
 
+// Get field value changes for a specific field
+app.get('/api/field-value-changes', async (req, res) => {
+  try {
+    const { field_id, action_type, person_id, organization_id, opportunity_id, list_entry_id } = req.query;
+    
+    if (!field_id) {
+      return res.status(400).json({ error: 'field_id is required' });
+    }
+    
+    console.log('Field value changes request:', { field_id, action_type, person_id, organization_id, opportunity_id, list_entry_id });
+    console.log('API Key available:', !!AFFINITY_API_KEY);
+    console.log('API Key length:', AFFINITY_API_KEY ? AFFINITY_API_KEY.length : 0);
+    console.log('API Key format check:', AFFINITY_API_KEY ? AFFINITY_API_KEY.substring(0, 10) + '...' : 'None');
+    
+    // Test if API key works with v2 endpoint first
+    try {
+      const testResponse = await makeAffinityRequest('/v2/lists');
+      console.log('V2 API test successful, API key is valid');
+    } catch (testError) {
+      console.log('V2 API test failed, API key might be invalid:', testError.message);
+    }
+    
+    let params = { field_id };
+    if (action_type) params.action_type = action_type;
+    if (person_id) params.person_id = person_id;
+    if (organization_id) params.organization_id = organization_id;
+    if (opportunity_id) params.opportunity_id = opportunity_id;
+    if (list_entry_id) params.list_entry_id = list_entry_id;
+    
+    console.log('Request params:', params);
+    
+    // Try different authentication methods for field-value-changes endpoint
+    let response;
+    try {
+      // Method 1: Basic auth with API key as username and empty password
+      response = await axios.get(`${AFFINITY_BASE_URL}/field-value-changes`, {
+        auth: {
+          username: AFFINITY_API_KEY, // API key as username
+          password: '' // Empty password
+        },
+        params
+      });
+      console.log('Success with basic auth (API key as username)');
+    } catch (authError1) {
+      console.log('Basic auth with API key as username failed, trying as password...');
+      try {
+        // Method 2: Basic auth with API key as password and empty username
+        response = await axios.get(`${AFFINITY_BASE_URL}/field-value-changes`, {
+          auth: {
+            username: '', // Empty username
+            password: AFFINITY_API_KEY // API key as password
+          },
+          params
+        });
+        console.log('Success with basic auth (API key as password)');
+      } catch (authError2) {
+        console.log('Basic auth with API key as password failed, trying bearer token...');
+        try {
+          // Method 3: Bearer token (like v2 endpoints)
+          response = await axios.get(`${AFFINITY_BASE_URL}/field-value-changes`, {
+            headers: {
+              'Authorization': `Bearer ${AFFINITY_API_KEY}`
+            },
+            params
+          });
+          console.log('Success with bearer token');
+        } catch (bearerError) {
+          console.log('Bearer token failed, trying API key in params...');
+          // Method 4: API key as query parameter
+          const paramsWithKey = { ...params, api_key: AFFINITY_API_KEY };
+          response = await axios.get(`${AFFINITY_BASE_URL}/field-value-changes`, {
+            params: paramsWithKey
+          });
+          console.log('Success with API key in params');
+        }
+      }
+    }
+    
+    console.log('Field value changes response status:', response.status);
+    console.log('Field value changes response data length:', response.data ? response.data.length : 0);
+    
+    res.json(response.data);
+  } catch (error) {
+    console.error('Field value changes API error:', error.response?.data || error.message);
+    console.error('Error status:', error.response?.status);
+    console.error('Error headers:', error.response?.headers);
+    res.status(500).json({ error: 'Failed to fetch field value changes' });
+  }
+});
+
 // Get opportunities
 app.get('/api/opportunities', async (req, res) => {
   try {

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Interactive pipeline visualization for Affinity CRM leads",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"

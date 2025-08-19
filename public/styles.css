@@ -2287,4 +2287,9 @@ body {
         padding: 8px 12px;
         font-size: 12px;
     }
-} 
+}
+
+@media (max-width:768px){
+    .funnel-viz{ min-height:400px; }
+    .pipeline-viz{ min-height:400px; }
+}

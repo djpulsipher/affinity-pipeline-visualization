@@ -1927,7 +1927,7 @@ body {
 /* Improved Summary Stats - Juvo Blue Theme */
 .summary-stats {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 20px;
     margin-bottom: 30px;
     justify-content: center;
@@ -2277,14 +2277,12 @@ body {
 /* Responsive adjustments */
 @media (max-width: 1200px) {
     .summary-stats {
-        grid-template-columns: repeat(2, 1fr);
         gap: 15px;
     }
 }
 
 @media (max-width: 768px) {
     .summary-stats {
-        grid-template-columns: 1fr;
         gap: 15px;
     }
     
@@ -2307,6 +2305,12 @@ body {
         font-size: 12px;
     }
 }
+
+
+@media (max-width: 480px) {
+    .summary-stats {
+        gap: 10px;
+    }
 
 @media (max-width:768px){
     .funnel-viz{ min-height:400px; }

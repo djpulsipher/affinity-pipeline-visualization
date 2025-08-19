@@ -5,5 +5,10 @@
     { "src": "app.js", "use": "@vercel/static" },
     { "src": "styles.css", "use": "@vercel/static" },
     { "src": "api/**/*.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/lists", "dest": "/api/lists.js" },
+    { "src": "/api/lists/(.*)/fields", "dest": "/api/lists/[id]/fields.js" },
+    { "src": "/(.*)", "dest": "/$1" }
   ]
 }

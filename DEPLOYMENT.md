@@ -2,6 +2,13 @@
 
 This guide covers multiple options for hosting your Affinity Pipeline Visualization.
 
+## 🌐 Vercel (Serverless)
+
+1. Install the Vercel CLI: `npm install -g vercel`
+2. Run `vercel` from the project root and follow the prompts
+3. In the Vercel dashboard, add the `AFFINITY_API_KEY` environment variable
+4. Redeploy to apply the variable
+
 ## 🚀 Quick Start - Railway (Recommended)
 
 ### Step 1: Prepare Your Repository

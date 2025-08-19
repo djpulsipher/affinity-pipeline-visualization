@@ -72,21 +72,13 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeApp() {
-    // Load saved API key
-    const savedApiKey = localStorage.getItem('affinityApiKey');
-    if (savedApiKey) {
-        document.getElementById('apiKey').value = savedApiKey;
-    }
-    
     // Load individual lead weights
     loadIndividualLeadWeights();
-    
+
     // Load pipeline history
     loadPipelineHistory();
 
     // Add event listeners with null checks
-    const saveApiKeyBtn = document.getElementById('saveApiKey');
-    if (saveApiKeyBtn) saveApiKeyBtn.addEventListener('click', saveApiKey);
     
     const loadDataBtn = document.getElementById('loadData');
     if (loadDataBtn) loadDataBtn.addEventListener('click', loadPipelineData);
@@ -166,18 +158,6 @@ function initializeApp() {
 
     // Load lists on startup
     loadLists();
-}
-
-// API Key management
-function saveApiKey() {
-    const apiKey = document.getElementById('apiKey').value.trim();
-    if (apiKey) {
-        localStorage.setItem('affinityApiKey', apiKey);
-        showNotification('API key saved successfully!', 'success');
-        loadLists(); // Reload lists with new API key
-    } else {
-        showNotification('Please enter a valid API key', 'error');
-    }
 }
 
 // Load lists from Affinity API
@@ -3563,24 +3543,17 @@ function clearChangeHistory() {
 }
 
 function clearStorage() {
-    if (confirm('This will clear all localStorage data except your API key. This may help resolve storage issues. Continue?')) {
-        const apiKey = localStorage.getItem('affinityApiKey');
-        
+    if (confirm('This will clear all localStorage data. This may help resolve storage issues. Continue?')) {
         // Clear all localStorage
         localStorage.clear();
-        
-        // Restore API key
-        if (apiKey) {
-            localStorage.setItem('affinityApiKey', apiKey);
-        }
-        
+
         // Reset variables
         pipelineHistory = [];
         stageWeights = {};
         excludedStages = new Set();
         stageOrder = [];
         individualLeadWeights = {};
-        
+
         updateChangeHistoryDisplay();
         showNotification('localStorage cleared successfully', 'success');
     }
@@ -4252,7 +4225,7 @@ function clearLocalStorageIfNeeded() {
         console.warn('localStorage is full, clearing old data');
         
         // Clear old data to make space
-        const keysToKeep = ['affinityApiKey', 'stageWeights', 'excludedStages', 'stageOrder', 'individualLeadWeights', 'defaultSettings'];
+        const keysToKeep = ['stageWeights', 'excludedStages', 'stageOrder', 'individualLeadWeights', 'defaultSettings'];
         const keysToRemove = [];
         
         for (let i = 0; i < localStorage.length; i++) {

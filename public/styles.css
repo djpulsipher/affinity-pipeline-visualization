@@ -500,11 +500,16 @@ body {
 
 /* Funnel Visualization */
 .funnel-viz {
-    min-height: 600px;
     position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
+}
+
+@media (max-width: 600px) {
+    .funnel-viz {
+        min-height: 400px;
+    }
 }
 
 .funnel-viz svg {
@@ -514,7 +519,6 @@ body {
 
 /* Make funnel visualization bigger */
 #funnelViz {
-    min-height: 600px;
     display: flex;
     justify-content: center;
     align-items: center;

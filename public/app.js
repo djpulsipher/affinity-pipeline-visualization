@@ -767,19 +767,19 @@ function createFunnelVisualization() {
             'url(#gradient10)'
         ];
         
-        // Create SVG for funnel - Made bigger with extra space for arrows
-        const width = 900;
+        // Create SVG for funnel - Made responsive with container width
+        const width = container.clientWidth;
         const margin = { top: 30, right: 120, bottom: 30, left: 30 }; // Extra right margin for arrows
         const stageHeight = 80;
         const spacing = 15;
         const totalHeight = stageData.length * (stageHeight + spacing) + margin.top + margin.bottom;
         const height = Math.max(600, totalHeight);
-        
+
         const svg = d3.select(container)
             .append('svg')
-            .attr('width', width)
-            .attr('height', height)
-            .style('max-width', '100%')
+            .attr('viewBox', `0 0 ${width} ${height}`)
+            .attr('preserveAspectRatio', 'xMinYMin meet')
+            .style('width', '100%')
             .style('height', 'auto');
         
         // Add gradient definitions

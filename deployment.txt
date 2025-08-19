@@ -204,6 +204,7 @@ Troubleshooting checklist
 Make sure your function file path matches the URL (e.g., /api/lists.js → /api/lists).
 	•	“Missing AFFINITY_API_KEY”
 You didn’t add the env var in Vercel, or you didn’t redeploy after adding it.
+Verify the variable is available by visiting `/api/env` on your deployed site.
 	•	CORS issues
 Won’t happen if your front-end and /api are on the same domain (they are).
 	•	Static site not loading

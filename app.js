@@ -169,8 +169,15 @@ async function loadLists() {
     try {
         showLoading('Loading lists...');
         const response = await fetch('/api/lists');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Failed to load lists:', errorText);
+            showNotification('Failed to load lists. Please check your API key.', 'error');
+            hideLoading();
+            return;
+        }
         const responseData = await response.json();
-        
+
         // Handle the API response structure with data wrapper
         const lists = responseData.data || responseData;
         
@@ -209,8 +216,15 @@ async function onListChange() {
         
         // Load fields for the selected list
         const response = await fetch(`/api/lists/${listId}/fields`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Failed to load fields:', errorText);
+            showNotification('Failed to load fields. Please check your API key.', 'error');
+            hideLoading();
+            return;
+        }
         const responseData = await response.json();
-        
+
         // Handle the API response structure with data wrapper
         const fields = responseData.data || responseData;
         

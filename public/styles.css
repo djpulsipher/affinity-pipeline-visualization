@@ -44,35 +44,6 @@ body {
     margin-right: 10px;
 }
 
-.header-controls {
-    display: flex;
-    gap: 15px;
-    align-items: center;
-}
-
-.api-key-section {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.api-key-section label {
-    font-weight: 500;
-    color: #555;
-}
-
-.api-key-section input {
-    padding: 8px 12px;
-    border: 2px solid #e1e8ed;
-    border-radius: 8px;
-    font-size: 14px;
-    transition: border-color 0.3s ease;
-}
-
-.api-key-section input:focus {
-    outline: none;
-    border-color: #667eea;
-}
 
 /* Buttons */
 .btn {
@@ -1016,10 +987,6 @@ body {
         justify-content: center;
     }
     
-    .api-key-section {
-        flex-direction: column;
-        align-items: stretch;
-    }
 }
 
 /* D3.js specific styles */

@@ -63,14 +63,10 @@ Each change entry shows:
 1. Clone the repository
 2. Install dependencies: `npm install`
 3. Copy `env.example` to `.env` and add your Affinity API key
-4. Start the server: `npm start`
+4. Start the development server: `npm start`
 5. Open your browser to `http://localhost:3000`
 
 ## Configuration
-
-### API Key
-- Enter your Affinity API key in the header
-- Click "Save" to store it locally
 
 ### Pipeline Configuration
 1. Select your target list from the dropdown

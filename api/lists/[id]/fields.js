@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     // 3) Call the Affinity API with Basic auth
     const authHeader = 'Basic ' + Buffer.from(`${key}:`).toString('base64');
 
-    const upstream = await fetch(`https://api.affinity.co/lists/${encodeURIComponent(id)}/fields`, {
+    const upstream = await fetch(`https://api.affinity.co/v2/lists/${encodeURIComponent(id)}/fields`, {
       headers: {
         'Authorization': authHeader,
         'Accept': 'application/json'

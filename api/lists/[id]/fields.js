@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     // 2) Get the list ID from the URL
     const { id } = req.query;
     if (!id) {
-      res.status(400).json({ error: 'List ID is required' });
+      res.status(400).json({ error: 'Missing list ID' });
       return;
     }
 

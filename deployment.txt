@@ -1,0 +1,228 @@
+you got it. here’s the “IKEA manual” to get your app live on Vercel with a normal URL, plus one working /api function you can paste in.
+
+⸻
+
+0) What you’ll end up with
+	•	A site like https://pipeline-yourname.vercel.app (and optionally https://pipeline.juvoventures.com)
+	•	Static files (HTML/CSS/JS) are served globally (fast).
+	•	Your secret Affinity key lives on the server.
+	•	Your app calls your own URLs like /api/lists, and the serverless function calls Affinity safely.
+
+⸻
+
+1) Put your files in the right places
+
+Vercel serves static files from the project root by default (not a /public folder unless you use Next.js). The simplest path is to move your static files up one level.
+
+Do this in your project folder:
+
+/ (project root)
+  index.html        ← move here from /public (if it’s inside /public)
+  app.js            ← move here from /public
+  styles.css        ← move here (if you have it)
+  /assets           ← move here (images/fonts/etc.)
+  /api              ← create this folder; will hold serverless functions
+
+If your HTML currently references scripts like ./app.js and images like ./assets/logo.png, those will still work after moving them to root.
+
+Keep your D3 code exactly as-is. No path changes in JS fetch calls (we’ll serve /api/... from the same origin).
+
+⸻
+
+2) Add your first serverless function: /api/lists.js
+
+Create a file: /api/lists.js (exact name and path).
+
+Paste this:
+
+// /api/lists.js
+export default async function handler(req, res) {
+  try {
+    // 1) Read your secret from Vercel env vars
+    const key = process.env.AFFINITY_API_KEY;
+    if (!key) {
+      res.status(500).json({ error: 'Missing AFFINITY_API_KEY on the server' });
+      return;
+    }
+
+    // 2) Call the Affinity API with Basic auth (key as username, blank password)
+    const authHeader = 'Basic ' + Buffer.from(`${key}:`).toString('base64');
+
+    const upstream = await fetch('https://api.affinity.co/lists', {
+      headers: {
+        'Authorization': authHeader,
+        'Accept': 'application/json'
+      }
+    });
+
+    // 3) Forward errors transparently (helps debugging)
+    if (!upstream.ok) {
+      const text = await upstream.text();
+      res.status(upstream.status).send(text);
+      return;
+    }
+
+    // 4) Return JSON to your frontend
+    const data = await upstream.json();
+    res.status(200).json(data);
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
+}
+
+This gives you a working /api/lists endpoint. Your browser JS can fetch('/api/lists') with no secret exposed.
+
+You’ll later make similar files:
+	•	/api/lists/[id]/fields.js (dynamic route)
+	•	/api/pipeline-data.js
+	•	/api/fields/[fieldId]/definition.js
+
+(You can copy the pattern above: read key → call Affinity → pass JSON back.)
+
+⸻
+
+3) Remove any client-side “save API key” UI
+
+If your front-end has an input that stores the Affinity key in localStorage, remove or hide it. Your browser should never see the key now. You’ll keep your existing fetch('/api/...') calls.
+
+⸻
+
+4) Make it a Git repo and push to GitHub
+
+In your project folder (Terminal):
+
+git init
+git add .
+git commit -m "Initial Vercel deployment"
+# Create a new empty GitHub repo first at github.com (no README)
+git remote add origin https://github.com/<your-username>/<your-repo>.git
+git push -u origin main
+
+If Git warns your default branch isn’t main, do:
+
+git branch -M main
+git push -u origin main
+
+
+⸻
+
+5) Create the Vercel project and connect GitHub
+	1.	Go to vercel.com and sign in (or create an account).
+	2.	Click Add New… → Project → Import Git Repository.
+	3.	Pick your repo.
+	4.	Build settings: leave empty (no build command). Vercel will serve your files as static + /api functions.
+	5.	Click Deploy (it will fail at runtime until you add the env var in the next step—that’s OK).
+
+⸻
+
+6) Add your secret on Vercel (Environment Variable)
+	1.	In Vercel, open your project → Settings → Environment Variables.
+	2.	Add:
+	•	Name: AFFINITY_API_KEY
+	•	Value: your Affinity API key (paste it carefully)
+	•	Environment: Production (and Preview if you want PR previews to work)
+	3.	Click Save.
+	4.	Back at the top of the project page, click Redeploy (or push a new commit to trigger a deploy).
+
+⸻
+
+7) Test that it’s live
+	•	Visit the URL Vercel gives you (something like https://<project>.vercel.app). Your app should load.
+	•	Test the API directly by opening:
+https://<project>.vercel.app/api/lists
+You should see JSON (or a helpful error if the key or permissions are wrong).
+
+If your front-end calls /api/lists from app.js, your charts should populate.
+
+⸻
+
+8) (Optional) Add a custom domain
+	1.	In your project on Vercel → Settings → Domains → Add.
+	2.	Enter pipeline.juvoventures.com (or whatever you like).
+	3.	Vercel shows you the DNS record to add at your DNS provider (likely a CNAME).
+	4.	Add it, wait for it to verify (few minutes), and you’re done. HTTPS is automatic.
+
+⸻
+
+9) (Optional but recommended) Gate it behind Google SSO (no code)
+
+If you only want your team to access the site:
+	•	Easiest: Use Cloudflare Access:
+	1.	Put your domain behind Cloudflare (free plan is fine).
+	2.	Enable Zero Trust → Access.
+	3.	Create an Application for pipeline.juvoventures.com.
+	4.	Policy: allow emails like *@juvoventures.com (or specific addresses).
+	5.	Users will be prompted to sign in with Google; you don’t write any auth code.
+
+(You can also use Vercel’s built-in Access Controls on paid tiers, or add Auth.js later.)
+
+⸻
+
+10) How to add more API routes (pattern to copy)
+
+Dynamic route example: /api/fields/[fieldId]/definition.js
+
+/api
+  /fields
+    /[fieldId]
+      definition.js
+
+// /api/fields/[fieldId]/definition.js
+export default async function handler(req, res) {
+  const key = process.env.AFFINITY_API_KEY;
+  if (!key) return res.status(500).json({ error: 'Missing AFFINITY_API_KEY' });
+
+  const { fieldId } = req.query; // "12345" from the URL
+  const authHeader = 'Basic ' + Buffer.from(`${key}:`).toString('base64');
+
+  try {
+    // NOTE: Confirm the exact endpoint for "field definition" in Affinity docs.
+    // Common patterns are /fields/{id} or /field-definitions/{id}
+    const upstream = await fetch(`https://api.affinity.co/fields/${encodeURIComponent(fieldId)}`, {
+      headers: { 'Authorization': authHeader, 'Accept': 'application/json' }
+    });
+
+    if (!upstream.ok) {
+      const text = await upstream.text();
+      return res.status(upstream.status).send(text);
+    }
+
+    const data = await upstream.json();
+    return res.status(200).json(data);
+  } catch (e) {
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+}
+
+You can now call fetch('/api/fields/123/definition') in the browser.
+If Affinity uses a slightly different endpoint for definitions, just update the URL inside this one function.
+
+⸻
+
+Troubleshooting checklist
+	•	404 for /api/...
+Make sure your function file path matches the URL (e.g., /api/lists.js → /api/lists).
+	•	“Missing AFFINITY_API_KEY”
+You didn’t add the env var in Vercel, or you didn’t redeploy after adding it.
+	•	CORS issues
+Won’t happen if your front-end and /api are on the same domain (they are).
+	•	Static site not loading
+Ensure your index.html is at the project root (not only inside /public), or you’re using a framework that understands /public.
+
+⸻
+
+Minimal local test (optional)
+
+If you want to verify static files locally before pushing:
+
+# from your project root where index.html is
+npx serve .
+# it prints a local URL (like http://localhost:3000). open it.
+
+(Serverless functions run only on Vercel unless you add a local dev server, so you’ll mostly test those after deploying.)
+
+⸻
+
+You’re done 🎉
+
+Push to GitHub → Vercel deploys → share the URL with your team. Want me to sketch the exact pipeline-data function next (based on how you’re calculating the bar chart)?

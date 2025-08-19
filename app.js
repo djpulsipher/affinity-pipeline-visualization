@@ -72,11 +72,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeApp() {
-    // Load saved API key
-    const savedApiKey = localStorage.getItem('affinityApiKey');
-    if (savedApiKey) {
-        document.getElementById('apiKey').value = savedApiKey;
-    }
+    // API key is now handled server-side on Vercel
     
     // Load individual lead weights
     loadIndividualLeadWeights();
@@ -85,8 +81,6 @@ function initializeApp() {
     loadPipelineHistory();
 
     // Add event listeners with null checks
-    const saveApiKeyBtn = document.getElementById('saveApiKey');
-    if (saveApiKeyBtn) saveApiKeyBtn.addEventListener('click', saveApiKey);
     
     const loadDataBtn = document.getElementById('loadData');
     if (loadDataBtn) loadDataBtn.addEventListener('click', loadPipelineData);
@@ -168,17 +162,7 @@ function initializeApp() {
     loadLists();
 }
 
-// API Key management
-function saveApiKey() {
-    const apiKey = document.getElementById('apiKey').value.trim();
-    if (apiKey) {
-        localStorage.setItem('affinityApiKey', apiKey);
-        showNotification('API key saved successfully!', 'success');
-        loadLists(); // Reload lists with new API key
-    } else {
-        showNotification('Please enter a valid API key', 'error');
-    }
-}
+// API key is now handled server-side on Vercel
 
 // Load lists from Affinity API
 async function loadLists() {

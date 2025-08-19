@@ -5,14 +5,14 @@
   ],
   "routes": [
     { "src": "/api/lists", "dest": "/api/lists.js" },
-    { "src": "/api/lists/(?<listId>[^/]+)/fields", "dest": "/api/lists/[listId]/fields.js" },
-    { "src": "/api/lists/(?<listId>[^/]+)/list-entries", "dest": "/api/lists/[listId]/list-entries.js" },
+    { "src": "/api/lists/(?<listId>[^/]+)/fields", "dest": "/api/lists/[listId]/fields.js?listId=$listId" },
+    { "src": "/api/lists/(?<listId>[^/]+)/list-entries", "dest": "/api/lists/[listId]/list-entries.js?listId=$listId" },
     { "src": "/api/field-values", "dest": "/api/field-values.js" },
     { "src": "/api/pipeline-data", "dest": "/api/pipeline-data.js" },
     { "src": "/api/field-value-changes", "dest": "/api/field-value-changes.js" },
     { "src": "/api/opportunities", "dest": "/api/opportunities.js" },
-    { "src": "/api/fields/(?<fieldId>[^/]+)/definition", "dest": "/api/fields/[fieldId]/definition.js" },
-    { "src": "/api/test-fields/(?<listId>[^/]+)", "dest": "/api/test-fields/[listId].js" },
+    { "src": "/api/fields/(?<fieldId>[^/]+)/definition", "dest": "/api/fields/[fieldId]/definition.js?fieldId=$fieldId" },
+    { "src": "/api/test-fields/(?<listId>[^/]+)", "dest": "/api/test-fields/[listId].js?listId=$listId" },
     { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }

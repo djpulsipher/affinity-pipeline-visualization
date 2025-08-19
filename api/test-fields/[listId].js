@@ -2,6 +2,10 @@ const { makeAffinityRequest } = require('../affinityClient');
 
 module.exports = async (req, res) => {
   const { listId } = req.query;
+  if (!listId) {
+    return res.status(400).json({ error: 'listId is required' });
+  }
+
   try {
     const fieldsResponse = await makeAffinityRequest(`/v2/lists/${listId}/fields`);
     const fields = fieldsResponse.data || fieldsResponse;
@@ -70,6 +74,7 @@ module.exports = async (req, res) => {
       }))
     });
   } catch (error) {
+    console.error('Error testing fields:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to test fields' });
   }
 };

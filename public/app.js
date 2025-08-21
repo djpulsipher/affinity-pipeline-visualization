@@ -180,7 +180,8 @@ async function loadLists() {
                 lists.forEach(list => {
                     const option = document.createElement('option');
                     option.value = list.id;
-                    option.textContent = `${list.name} (${list.list_size || 0} entries)`;
+                    const count = list.list_size || list.entry_count || list.entryCount || list.size || 0;
+                    option.textContent = `${list.name} (${count} entries)`;
                     listSelect.appendChild(option);
                 });
             } else {
@@ -961,24 +962,23 @@ function createFunnelVisualization() {
             const toStageIndex = stageData.findIndex(s => s.stage === movement.toStage);
 
             if (fromStageIndex !== -1 && toStageIndex !== -1 && fromStageIndex !== toStageIndex) {
-                const fromStage = stageData[fromStageIndex];
-                const toStage = stageData[toStageIndex];
-
                 // Calculate positions for the arrow - on the right side of the funnel
                 const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
                 const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
 
                 // Offset arrows horizontally by lane to prevent overlap
                 const arrowX = width - margin.right + 20 + (movement.offset || 0);
-                const controlPoint1X = arrowX + 30;
-                const controlPoint2X = arrowX + 30;
 
                 // Create arrow path
                 const arrowGroup = svg.append('g')
                     .attr('class', 'movement-arrow');
 
-                // Curved arrow path
-                const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${fromY} ${controlPoint2X} ${toY} ${arrowX} ${toY}`;
+                // Curved arrow path that exits the stage, dips, then returns with vertical orientation
+                const controlPoint1X = arrowX + 30;
+                const controlPoint1Y = fromY;
+                const controlPoint2X = arrowX;
+                const controlPoint2Y = toY - 30;
+                const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${controlPoint1Y}, ${controlPoint2X} ${controlPoint2Y}, ${arrowX} ${toY}`;
 
                 arrowGroup.append('path')
                     .attr('d', pathData)
@@ -1016,7 +1016,7 @@ function createFunnelVisualization() {
         svg.append('defs').append('marker')
             .attr('id', 'arrowhead')
             .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 10)
+            .attr('refX', 5)
             .attr('refY', 0)
             .attr('orient', 'auto')
             .attr('markerWidth', 6)
@@ -1445,7 +1445,7 @@ function showStageDetails(stageData) {
             <div class="change-summary-grid">
                 ${changeStats.newLeads > 0 ? `<div class="change-stat positive"><i class="fas fa-plus-circle"></i> <strong>${changeStats.newLeads}</strong> new leads ($${formatCurrency(changeStats.valueAdded)})</div>` : ''}
                 ${changeStats.removedLeads > 0 ? `<div class="change-stat negative"><i class="fas fa-minus-circle"></i> <strong>${changeStats.removedLeads}</strong> removed leads ($${formatCurrency(changeStats.valueRemoved)})</div>` : ''}
-                ${changeStats.stageChanges > 0 ? `<div class="change-stat neutral"><i class="fas fa-exchange-alt"></i> <strong>${changeStats.stageChanges}</strong> leads moved to this stage</div>` : ''}
+                ${changeStats.stageChanges > 0 ? `<div class="change-stat neutral"><i class="fas fa-exchange-alt"></i> <strong>${changeStats.stageChanges}</strong> leads moved from this stage</div>` : ''}
             </div>
         </div>
         ` : ''}
@@ -4610,7 +4610,7 @@ function getStageMovements() {
             if (laneOffsets[laneKey] === undefined) {
                 laneOffsets[laneKey] = Object.keys(laneOffsets).length;
             }
-            group.offset = laneOffsets[laneKey] * 15;
+            group.offset = laneOffsets[laneKey] * 25;
         });
 
         return groups;

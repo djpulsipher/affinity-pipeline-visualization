@@ -23,6 +23,7 @@ let autoRefreshMinutes = 5; // Refresh every 5 minutes by default
 let historicalMode = false; // Whether we're viewing historical data
 let historicalSnapshot = null; // The historical snapshot being viewed
 let lastFieldValueChanges = null; // Cache of field value changes for building historical snapshots
+let lastProcessedChanges = null; // Processed changes from last historical search
 
 let defaultSettings = {
     defaultStageField: '',
@@ -3832,8 +3833,9 @@ async function getFieldValueChanges(fieldId, startDate, endDate, options) {
         const processedChanges = processFieldValueChanges(changesByLead, startDate, endDate, options);
         console.log('Processed changes:', processedChanges);
 
-        // Cache raw changes for reconstructing pipeline snapshots
+        // Cache raw and processed changes for reconstructing pipeline snapshots
         lastFieldValueChanges = { changesByLead, startDate, endDate };
+        lastProcessedChanges = processedChanges;
 
         displayHistoricalResults(processedChanges, startDate, endDate);
     } catch (error) {
@@ -3874,7 +3876,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
                 const stage = change.value?.text || 'Unknown Stage';
                 changes.push({
                     type: 'new_lead',
-                    leadId: lead.entity_id,
+                    leadId: lead.id,
                     leadName,
                     stage,
                     value,
@@ -3887,7 +3889,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
             } else if (change.action_type === 1 && options.includeRemovedLeads) {
                 changes.push({
                     type: 'removed_lead',
-                    leadId: lead.entity_id,
+                    leadId: lead.id,
                     leadName,
                     stage: previousStage || 'Unknown Stage',
                     value,
@@ -3901,7 +3903,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
                 const newStage = change.value?.text || 'Unknown Stage';
                 changes.push({
                     type: 'stage_change',
-                    leadId: lead.entity_id,
+                    leadId: lead.id,
                     leadName,
                     oldStage: previousStage || 'Unknown Stage',
                     newStage,
@@ -4242,6 +4244,7 @@ function revertToCurrentData() {
         currentData = { ...historicalSnapshot };
         historicalMode = false;
         historicalSnapshot = null;
+        lastProcessedChanges = null;
         
         // Update the UI
         updateVisualization();
@@ -4362,6 +4365,38 @@ function clearLocalStorageIfNeeded() {
 
 // Change analysis functions for funnel visualization
 function getStageChangeStats(stageName) {
+    // When viewing a historical period, derive stats from processed changes
+    if (historicalMode && Array.isArray(lastProcessedChanges)) {
+        const stats = {
+            newLeads: 0,
+            removedLeads: 0,
+            stageChanges: 0,
+            valueAdded: 0,
+            valueRemoved: 0,
+            hasChanges: false
+        };
+
+        lastProcessedChanges.forEach(change => {
+            if (change.type === 'new_lead' && change.stage === stageName) {
+                const leadStillHere = currentData.leads.some(lead =>
+                    (lead.id == change.leadId || lead.entity_id == change.leadId) && lead.stage === stageName
+                );
+                if (leadStillHere) {
+                    stats.newLeads++;
+                    stats.valueAdded += change.value || 0;
+                }
+            } else if (change.type === 'removed_lead' && change.stage === stageName) {
+                stats.removedLeads++;
+                stats.valueRemoved += change.value || 0;
+            } else if (change.type === 'stage_change' && change.newStage === stageName) {
+                stats.stageChanges++;
+            }
+        });
+
+        stats.hasChanges = stats.newLeads > 0 || stats.removedLeads > 0 || stats.stageChanges > 0;
+        return stats;
+    }
+
     if (pipelineHistory.length < 2) {
         return {
             newLeads: 0,
@@ -4372,28 +4407,28 @@ function getStageChangeStats(stageName) {
             hasChanges: false
         };
     }
-    
+
     const recentChanges = [];
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 7);
-    
+
     // Get changes from the last 7 days
     for (let i = 1; i < pipelineHistory.length; i++) {
         const currentSnapshot = pipelineHistory[i];
         const previousSnapshot = pipelineHistory[i - 1];
-        
+
         const snapshotDate = new Date(currentSnapshot.timestamp);
         if (snapshotDate > cutoffDate) {
             const changes = detectPipelineChanges(currentSnapshot, previousSnapshot);
             recentChanges.push(...changes);
         }
     }
-    
+
     // Filter changes for this specific stage - only count where leads CURRENTLY are
     const stageChanges = recentChanges.filter(change => {
         if (change.type === 'new_lead') {
             // Only count if the lead is still in this stage (not moved away)
-            const leadStillHere = currentData.leads.some(lead => 
+            const leadStillHere = currentData.leads.some(lead =>
                 lead.id == change.leadId && lead.stage === stageName
             );
             return change.stage === stageName && leadStillHere;
@@ -4405,7 +4440,7 @@ function getStageChangeStats(stageName) {
         }
         return false;
     });
-    
+
     const stats = {
         newLeads: stageChanges.filter(c => c.type === 'new_lead').length,
         removedLeads: stageChanges.filter(c => c.type === 'removed_lead').length,
@@ -4414,11 +4449,32 @@ function getStageChangeStats(stageName) {
         valueRemoved: stageChanges.filter(c => c.type === 'removed_lead').reduce((sum, c) => sum + c.value, 0),
         hasChanges: stageChanges.length > 0
     };
-    
+
     return stats;
 }
 
 function getLeadChangeInfo(leadId) {
+    if (historicalMode && Array.isArray(lastProcessedChanges)) {
+        const leadChanges = lastProcessedChanges.filter(change => change.leadId == leadId);
+        if (leadChanges.length === 0) {
+            return {
+                isNew: false,
+                isMoved: false,
+                oldStage: null,
+                changeDate: null,
+                changeType: null
+            };
+        }
+        const latestChange = leadChanges[0];
+        return {
+            isNew: latestChange.type === 'new_lead',
+            isMoved: latestChange.type === 'stage_change',
+            oldStage: latestChange.type === 'stage_change' ? latestChange.oldStage : null,
+            changeDate: latestChange.changeDate || new Date(latestChange.timestamp),
+            changeType: latestChange.type
+        };
+    }
+
     if (pipelineHistory.length < 2) {
         return {
             isNew: false,
@@ -4428,26 +4484,26 @@ function getLeadChangeInfo(leadId) {
             changeType: null
         };
     }
-    
+
     const recentChanges = [];
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 7);
-    
+
     // Get changes from the last 7 days
     for (let i = 1; i < pipelineHistory.length; i++) {
         const currentSnapshot = pipelineHistory[i];
         const previousSnapshot = pipelineHistory[i - 1];
-        
+
         const snapshotDate = new Date(currentSnapshot.timestamp);
         if (snapshotDate > cutoffDate) {
             const changes = detectPipelineChanges(currentSnapshot, previousSnapshot);
             recentChanges.push(...changes);
         }
     }
-    
+
     // Find changes for this specific lead
     const leadChanges = recentChanges.filter(change => change.leadId == leadId);
-    
+
     if (leadChanges.length === 0) {
         return {
             isNew: false,
@@ -4457,9 +4513,9 @@ function getLeadChangeInfo(leadId) {
             changeType: null
         };
     }
-    
+
     const latestChange = leadChanges[0]; // Most recent change
-    
+
     return {
         isNew: latestChange.type === 'new_lead',
         isMoved: latestChange.type === 'stage_change',
@@ -4484,26 +4540,66 @@ function formatChangeDate(date) {
 }
 
 function getStageMovements() {
+    // When viewing a historical period, compute movements from processed changes
+    if (historicalMode && Array.isArray(lastProcessedChanges)) {
+        const stageChanges = lastProcessedChanges.filter(c => c.type === 'stage_change');
+        const latestMovementByLead = {};
+
+        stageChanges.forEach(change => {
+            const existing = latestMovementByLead[change.leadId];
+            if (!existing || change.changeDate > existing.changeDate) {
+                latestMovementByLead[change.leadId] = {
+                    fromStage: change.oldStage,
+                    toStage: change.newStage,
+                    leadId: change.leadId,
+                    leadName: change.leadName,
+                    value: change.value,
+                    timestamp: change.timestamp,
+                    changeDate: change.changeDate
+                };
+            }
+        });
+
+        const movementGroups = {};
+        Object.values(latestMovementByLead).forEach(movement => {
+            const key = `${movement.fromStage}->${movement.toStage}`;
+            if (!movementGroups[key]) {
+                movementGroups[key] = {
+                    fromStage: movement.fromStage,
+                    toStage: movement.toStage,
+                    count: 0,
+                    totalValue: 0,
+                    movements: []
+                };
+            }
+            movementGroups[key].count++;
+            movementGroups[key].totalValue += movement.value;
+            movementGroups[key].movements.push(movement);
+        });
+
+        return Object.values(movementGroups);
+    }
+
     if (pipelineHistory.length < 2) {
         return [];
     }
-    
+
     const movements = [];
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 7);
-    
+
     // Get changes from the last 7 days
     for (let i = 1; i < pipelineHistory.length; i++) {
         const currentSnapshot = pipelineHistory[i];
         const previousSnapshot = pipelineHistory[i - 1];
-        
+
         const snapshotDate = new Date(currentSnapshot.timestamp);
         if (snapshotDate > cutoffDate) {
             const changes = detectPipelineChanges(currentSnapshot, previousSnapshot);
-            
+
             // Filter for stage changes only
             const stageChanges = changes.filter(change => change.type === 'stage_change');
-            
+
             stageChanges.forEach(change => {
                 const movement = {
                     fromStage: change.oldStage,
@@ -4517,11 +4613,11 @@ function getStageMovements() {
             });
         }
     }
-    
+
     // Group movements by from/to stage pairs, but only show final destinations
     const movementGroups = {};
     const leadFinalDestinations = new Map(); // Track where each lead ended up
-    
+
     // First pass: find final destination for each lead
     movements.forEach(movement => {
         leadFinalDestinations.set(movement.leadId, {
@@ -4531,7 +4627,7 @@ function getStageMovements() {
             timestamp: movement.timestamp
         });
     });
-    
+
     // Second pass: group by final destinations only
     leadFinalDestinations.forEach((finalMovement, leadId) => {
         const key = `${finalMovement.fromStage}->${finalMovement.toStage}`;
@@ -4554,7 +4650,7 @@ function getStageMovements() {
             timestamp: finalMovement.timestamp
         });
     });
-    
+
     return Object.values(movementGroups);
 }
 

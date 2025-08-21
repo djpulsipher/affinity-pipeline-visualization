@@ -31,7 +31,8 @@ let defaultSettings = {
     globalDefaultValue: 1000000,
     rules: [],
     closedWonStage: '',
-    closedWonValueField: ''
+    closedWonValueField: '',
+    lostStages: []
 };
 
 // New field mappings for lead age
@@ -123,6 +124,9 @@ function initializeApp() {
     
     const closedWonValueField = document.getElementById('closedWonValueField');
     if (closedWonValueField) closedWonValueField.addEventListener('change', updateDefaultSettings);
+
+    const lostStagesSelect = document.getElementById('lostStages');
+    if (lostStagesSelect) lostStagesSelect.addEventListener('change', updateDefaultSettings);
     
     const ruleField = document.getElementById('ruleField');
     if (ruleField) ruleField.addEventListener('change', onRuleFieldChange);
@@ -380,6 +384,7 @@ async function loadPipelineData() {
         
         // Populate closed/won stage values
         populateClosedWonStageValues();
+        populateLostStageValues();
         
         hideLoading();
         showNotification(`Pipeline data loaded successfully! Found ${currentData.leads.length} leads across ${currentData.stages.length} stages.`, 'success');
@@ -976,25 +981,22 @@ function createFunnelVisualization() {
         // Add movement arrows between stages - positioned on the right side
         const movements = getStageMovements();
         movements.forEach(movement => {
-            // Find the source and target stage positions
             const fromStageIndex = stageData.findIndex(s => s.stage === movement.fromStage);
             const toStageIndex = stageData.findIndex(s => s.stage === movement.toStage);
+            const isClosedWon = defaultSettings.closedWonStage === movement.toStage;
+            const isLost = defaultSettings.lostStages.includes(movement.toStage);
 
             if (fromStageIndex !== -1 && toStageIndex !== -1 && fromStageIndex !== toStageIndex) {
-                // Calculate positions for the arrow - on the right side of the funnel
                 const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
                 const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
 
-                // Offset arrows horizontally by lane to prevent overlap
                 let arrowX = width - margin.right + 40 + (movement.offset || 0);
                 const maxArrowX = width - 40;
                 if (arrowX > maxArrowX) arrowX = maxArrowX;
 
-                // Create arrow path
                 const arrowGroup = svg.append('g')
                     .attr('class', 'movement-arrow');
 
-                // Curved arrow path that exits the stage, dips, then returns with vertical orientation
                 const controlPoint1X = Math.min(arrowX + 40, width - 20);
                 const controlPoint1Y = fromY;
                 const controlPoint2X = arrowX;
@@ -1010,7 +1012,6 @@ function createFunnelVisualization() {
                     .attr('stroke-linecap', 'round')
                     .attr('marker-end', 'url(#arrowhead)');
 
-                // Movement count label - positioned on the curve
                 const midY = (fromY + toY) / 2;
                 const labelX = Math.min(arrowX + 20, width - 60);
 
@@ -1030,11 +1031,61 @@ function createFunnelVisualization() {
                     .attr('font-size', '10px')
                     .attr('font-weight', 'bold')
                     .text(movement.count > 9 ? '9+' : movement.count);
+            } else if (fromStageIndex !== -1 && (isClosedWon || isLost)) {
+                const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
+                let arrowX = width - margin.right + 40 + (movement.offset || 0);
+                const maxArrowX = width - 40;
+                if (arrowX > maxArrowX) arrowX = maxArrowX;
+                const endX = Math.min(arrowX + 60, width - 20);
+
+                const color = isClosedWon ? '#28a745' : '#dc3545';
+                const markerId = isClosedWon ? 'arrowhead-won' : 'arrowhead-lost';
+
+                const arrowGroup = svg.append('g')
+                    .attr('class', 'movement-arrow');
+
+                const pathData = `M ${arrowX} ${fromY} L ${endX} ${fromY}`;
+
+                arrowGroup.append('path')
+                    .attr('d', pathData)
+                    .attr('stroke', color)
+                    .attr('stroke-width', 3)
+                    .attr('fill', 'none')
+                    .attr('stroke-dasharray', '5,5')
+                    .attr('stroke-linecap', 'round')
+                    .attr('marker-end', `url(#${markerId})`);
+
+                const midX = (arrowX + endX) / 2;
+                arrowGroup.append('circle')
+                    .attr('cx', midX)
+                    .attr('cy', fromY)
+                    .attr('r', 12)
+                    .attr('fill', color)
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 2);
+
+                arrowGroup.append('text')
+                    .attr('x', midX)
+                    .attr('y', fromY + 4)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', 'white')
+                    .attr('font-size', '10px')
+                    .attr('font-weight', 'bold')
+                    .text(movement.count > 9 ? '9+' : movement.count);
+
+                arrowGroup.append('text')
+                    .attr('x', endX + 8)
+                    .attr('y', fromY + 4)
+                    .attr('fill', color)
+                    .attr('font-size', '14px')
+                    .attr('font-weight', 'bold')
+                    .text(isClosedWon ? '✓' : '✕');
             }
         });
 
-        // Add arrow marker definition
-        svg.append('defs').append('marker')
+        // Add arrow marker definitions
+        const markerDefs = defs;
+        markerDefs.append('marker')
             .attr('id', 'arrowhead')
             .attr('viewBox', '0 -5 10 10')
             .attr('refX', 5)
@@ -1045,6 +1096,30 @@ function createFunnelVisualization() {
             .append('path')
             .attr('d', 'M0,-5L10,0L0,5')
             .attr('fill', '#007bff');
+
+        markerDefs.append('marker')
+            .attr('id', 'arrowhead-won')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 5)
+            .attr('refY', 0)
+            .attr('orient', 'auto')
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#28a745');
+
+        markerDefs.append('marker')
+            .attr('id', 'arrowhead-lost')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 5)
+            .attr('refY', 0)
+            .attr('orient', 'auto')
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#dc3545');
     }
 }
 
@@ -1680,6 +1755,19 @@ function loadDefaultSettings() {
     
     const closedWonValueFieldInput = document.getElementById('closedWonValueField');
     if (closedWonValueFieldInput) closedWonValueFieldInput.value = defaultSettings.closedWonValueField;
+
+    const lostStagesInput = document.getElementById('lostStages');
+    if (lostStagesInput && Array.isArray(defaultSettings.lostStages)) {
+        Array.from(lostStagesInput.options).forEach(option => {
+            option.selected = defaultSettings.lostStages.includes(option.value);
+        });
+    }
+
+    // Ensure excluded stages include closed/won and lost selections
+    if (defaultSettings.closedWonStage) excludedStages.add(defaultSettings.closedWonStage);
+    if (Array.isArray(defaultSettings.lostStages)) {
+        defaultSettings.lostStages.forEach(stage => excludedStages.add(stage));
+    }
     
     renderDefaultRules();
     updatePiggyBank();
@@ -1850,6 +1938,32 @@ function populateClosedWonStageValues() {
             valueSelect.appendChild(option);
         });
     }
+}
+
+// Populate lost stage values
+function populateLostStageValues() {
+    const valueSelect = document.getElementById('lostStages');
+    if (!currentData || !valueSelect) return;
+
+    // Clear existing options
+    valueSelect.innerHTML = '<option value="">Select stage value...</option>';
+
+    const stageValues = new Set();
+    currentData.leads.forEach(lead => {
+        if (lead.stage) {
+            stageValues.add(lead.stage);
+        }
+    });
+
+    Array.from(stageValues).sort().forEach(stage => {
+        const option = document.createElement('option');
+        option.value = stage;
+        option.textContent = stage;
+        if (defaultSettings.lostStages.includes(stage)) {
+            option.selected = true;
+        }
+        valueSelect.appendChild(option);
+    });
 }
 
 // Handle rule field change to populate value dropdown
@@ -2131,24 +2245,27 @@ async function onDefaultStageFieldChange() {
 }
 
 function updateDefaultSettings() {
+    const oldClosedWon = defaultSettings.closedWonStage;
+    const oldLost = Array.isArray(defaultSettings.lostStages) ? [...defaultSettings.lostStages] : [];
+
     defaultSettings.defaultStageField = document.getElementById('defaultStageField').value;
     defaultSettings.defaultStageValue = document.getElementById('defaultStageValue').value;
     defaultSettings.globalDefaultValue = parseFloat(document.getElementById('globalDefaultValue').value) || 1000000;
     defaultSettings.closedWonStage = document.getElementById('closedWonStage').value;
     defaultSettings.closedWonValueField = document.getElementById('closedWonValueField').value;
-    
+    const lostSelect = document.getElementById('lostStages');
+    defaultSettings.lostStages = lostSelect ? Array.from(lostSelect.selectedOptions).map(o => o.value).filter(v => v) : [];
+
+    // Update excluded stages
+    excludedStages.delete(oldClosedWon);
+    oldLost.forEach(stage => excludedStages.delete(stage));
+    if (defaultSettings.closedWonStage) excludedStages.add(defaultSettings.closedWonStage);
+    defaultSettings.lostStages.forEach(stage => excludedStages.add(stage));
+
     localStorage.setItem('defaultSettings', JSON.stringify(defaultSettings));
-    
+
     // Re-process data if we have current data
     if (currentData) {
-        // The original loadPipelineData calls processPipelineDataWithDefaults,
-        // which now fetches last contact info. We need to re-call loadPipelineData
-        // to ensure all data is processed correctly, including the new field.
-        // However, the current structure of loadPipelineData doesn't allow
-        // for a direct re-call here. A more robust solution would involve
-        // a separate function for re-processing or a flag to indicate
-        // if the data needs to be re-processed.
-        // For now, we'll just update the UI elements.
         updateVisualization();
         updateSummaryStats();
         updatePiggyBank();
@@ -2573,18 +2690,16 @@ async function processPipelineDataWithDefaults(data) {
         }
         
         if (leadData.stage) {
-            // Check if this is a closed/won stage
             const isClosedWon = defaultSettings.closedWonStage === leadData.stage;
-            
+            const isLost = defaultSettings.lostStages.includes(leadData.stage);
+
             if (isClosedWon) {
                 console.log(`Processing closed/won lead ${lead.id} with stage: ${leadData.stage}`);
-                // For closed/won leads, use the specified value field for committed amount
                 if (defaultSettings.closedWonValueField) {
                     fieldValues.forEach(fieldValue => {
                         const fieldId = fieldValue.id;
                         const field = data.fields.find(f => f.id == fieldId);
                         if (field && field.name === defaultSettings.closedWonValueField) {
-                            // Handle new API structure for value extraction
                             let closedWonValue = 0;
                             if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 closedWonValue = parseFloat(fieldValue.value.data) || 0;
@@ -2594,20 +2709,21 @@ async function processPipelineDataWithDefaults(data) {
                             if (closedWonValue > 0) {
                                 leadData.value = closedWonValue;
                                 console.log(`Set closed/won value for lead ${lead.id}: ${closedWonValue}`);
-                                // Don't add to totalValue as closed/won leads are tracked separately
                             }
                         }
                     });
                 }
-            } else {
-                // Only add to totalValue for non-closed/won leads
+            } else if (!isLost) {
                 processed.totalValue += leadData.value;
             }
-            
-            processed.stages.add(leadData.stage);
+
+            if (!isClosedWon && !isLost) {
+                processed.stages.add(leadData.stage);
+            }
+
             processed.leads.push(leadData);
             processed.totalLeads++;
-            
+
             if (leadData.source) {
                 processed.sources.add(leadData.source);
             }

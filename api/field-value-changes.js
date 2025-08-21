@@ -46,6 +46,9 @@ module.exports = async (req, res) => {
 
     res.status(200).json(response.data);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch field value changes' });
+    const status = error.response?.status || 500;
+    const errorData = error.response?.data || { error: 'Failed to fetch field value changes' };
+    console.error('Field value changes API error', status, errorData);
+    res.status(status).json(errorData);
   }
 };

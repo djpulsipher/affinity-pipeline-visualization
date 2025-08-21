@@ -3774,7 +3774,13 @@ function analyzeHistoricalChanges(startDate, endDate, options) {
 }
 
 async function getFieldValueChanges(fieldId, startDate, endDate, options) {
-    console.log('getFieldValueChanges called with:', { fieldId, startDate, endDate, options });
+    const normalizedFieldId = String(fieldId).replace(/^field-/, '');
+    console.log('getFieldValueChanges called with:', {
+        fieldId: normalizedFieldId,
+        startDate,
+        endDate,
+        options
+    });
 
     if (!currentData || !currentData.leads) {
         showNotification('No pipeline data loaded. Please load pipeline data first.', 'error');
@@ -3787,7 +3793,7 @@ async function getFieldValueChanges(fieldId, startDate, endDate, options) {
         // Fetch field value changes for each lead in parallel
         await Promise.all(currentData.leads.map(async lead => {
             try {
-                const resp = await fetch(`/api/field-value-changes?field_id=${fieldId}&list_entry_id=${lead.id}`);
+                const resp = await fetch(`/api/field-value-changes?field_id=${normalizedFieldId}&list_entry_id=${lead.id}`);
                 if (!resp.ok) {
                     throw new Error(`HTTP error! status: ${resp.status}`);
                 }
@@ -3934,7 +3940,8 @@ async function showAvailableSnapshots() {
     
     try {
         // Get all field value changes for the stage field
-        const response = await fetch(`/api/field-value-changes?field_id=${stageField.id}`);
+        const fieldId = String(stageField.id).replace(/^field-/, '');
+        const response = await fetch(`/api/field-value-changes?field_id=${fieldId}`);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

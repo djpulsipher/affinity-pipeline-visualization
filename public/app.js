@@ -22,6 +22,8 @@ let autoRefreshMinutes = 5; // Refresh every 5 minutes by default
 // Historical search functionality
 let historicalMode = false; // Whether we're viewing historical data
 let historicalSnapshot = null; // The historical snapshot being viewed
+let lastFieldValueChanges = null; // Cache of field value changes for building historical snapshots
+let lastProcessedChanges = null; // Processed changes from last historical search
 
 let defaultSettings = {
     defaultStageField: '',
@@ -29,7 +31,8 @@ let defaultSettings = {
     globalDefaultValue: 1000000,
     rules: [],
     closedWonStage: '',
-    closedWonValueField: ''
+    closedWonValueField: '',
+    lostStages: []
 };
 
 // New field mappings for lead age
@@ -121,6 +124,9 @@ function initializeApp() {
     
     const closedWonValueField = document.getElementById('closedWonValueField');
     if (closedWonValueField) closedWonValueField.addEventListener('change', updateDefaultSettings);
+
+    const lostStagesSelect = document.getElementById('lostStages');
+    if (lostStagesSelect) lostStagesSelect.addEventListener('change', updateDefaultSettings);
     
     const ruleField = document.getElementById('ruleField');
     if (ruleField) ruleField.addEventListener('change', onRuleFieldChange);
@@ -178,7 +184,8 @@ async function loadLists() {
                 lists.forEach(list => {
                     const option = document.createElement('option');
                     option.value = list.id;
-                    option.textContent = `${list.name} (${list.list_size || 0} entries)`;
+                    const count = list.list_size || list.entry_count || list.entryCount || list.size || 0;
+                    option.textContent = `${list.name} (${count} entries)`;
                     listSelect.appendChild(option);
                 });
             } else {
@@ -377,6 +384,7 @@ async function loadPipelineData() {
         
         // Populate closed/won stage values
         populateClosedWonStageValues();
+        populateLostStageValues();
         
         hideLoading();
         showNotification(`Pipeline data loaded successfully! Found ${currentData.leads.length} leads across ${currentData.stages.length} stages.`, 'success');
@@ -430,7 +438,7 @@ function processPipelineData(data) {
             
             // Handle different value types from the new API structure
             let fieldValueData = null;
-            if (fieldValue.value && fieldValue.value.data) {
+            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                 // New API structure: value.data contains the actual value
                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                     fieldValueData = fieldValue.value.data?.text;
@@ -440,14 +448,17 @@ function processPipelineData(data) {
                     fieldValueData = fieldValue.value.data;
                 } else if (fieldValue.value.type === 'dropdown-multi') {
                     // Handle multi-select dropdowns - convert array to readable string
-                    if (Array.isArray(fieldValue.value.data)) {
-                        fieldValueData = fieldValue.value.data.join(', ');
-                    } else if (typeof fieldValue.value.data === 'object') {
+                    const data = fieldValue.value.data;
+                    if (Array.isArray(data)) {
+                        fieldValueData = data.join(', ');
+                    } else if (data && typeof data === 'object') {
                         // If it's an object with text properties, extract them
-                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                        const texts = Object.values(data).filter(val => typeof val === 'string');
                         fieldValueData = texts.join(', ');
+                    } else if (data != null) {
+                        fieldValueData = String(data);
                     } else {
-                        fieldValueData = String(fieldValue.value.data);
+                        fieldValueData = '';
                     }
                 } else if (fieldValue.value.type === 'interaction') {
                     // For relationship-intelligence fields, get the date
@@ -458,10 +469,13 @@ function processPipelineData(data) {
                     }
                 } else {
                     // For any other type, convert to string safely
-                    if (typeof fieldValue.value.data === 'object') {
-                        fieldValueData = JSON.stringify(fieldValue.value.data);
+                    const data = fieldValue.value.data;
+                    if (data && typeof data === 'object') {
+                        fieldValueData = JSON.stringify(data);
+                    } else if (data != null) {
+                        fieldValueData = String(data);
                     } else {
-                        fieldValueData = String(fieldValue.value.data);
+                        fieldValueData = '';
                     }
                 }
             } else {
@@ -769,7 +783,7 @@ function createFunnelVisualization() {
         
         // Create SVG for funnel - Made responsive with container width
         const width = container.clientWidth;
-        const margin = { top: 30, right: 120, bottom: 30, left: 30 }; // Extra right margin for arrows
+        const margin = { top: 30, right: 180, bottom: 30, left: 30 }; // Extra right margin for arrows
         const stageHeight = 80;
         const spacing = 15;
         const totalHeight = stageData.length * (stageHeight + spacing) + margin.top + margin.bottom;
@@ -871,21 +885,48 @@ function createFunnelVisualization() {
                         .attr('opacity', 1);
                 });
             
-            // Add stage name (white text with shadow for better readability) - Made bigger
-            stageGroup.append('text')
+            const textY = y + 45;
+
+            // Get change statistics for this stage
+            const changeStats = getStageChangeStats(stageInfo.stage);
+
+            // Base font size and max text width for each section
+            const baseFont = 18;
+            const sectionWidth = (topWidth - 30) / 3; // three equal sections with padding
+
+            const adjustTextSize = (textSel, maxWidth) => {
+                const node = textSel.node();
+                if (!node) return;
+                const length = node.getComputedTextLength();
+                if (length > maxWidth) {
+                    const scale = maxWidth / length;
+                    textSel.attr('font-size', `${baseFont * scale}px`);
+                }
+            };
+
+            // Add weighted value on the left
+            const valueText = stageGroup.append('text')
+                .attr('x', x + 15)
+                .attr('y', textY)
+                .attr('text-anchor', 'start')
+                .attr('fill', 'white')
+                .attr('font-weight', 'bold')
+                .attr('font-size', `${baseFont}px`)
+                .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
+                .text(`$${formatCurrency(stageInfo.weightedValue)}`);
+
+            // Stage name centered
+            const nameText = stageGroup.append('text')
                 .attr('x', x + topWidth / 2)
-                .attr('y', y + 25)
+                .attr('y', textY)
                 .attr('text-anchor', 'middle')
                 .attr('fill', 'white')
                 .attr('font-weight', 'bold')
-                .attr('font-size', '18px')
+                .attr('font-size', `${baseFont}px`)
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(stageInfo.stage);
-            
-            // Get change statistics for this stage
-            const changeStats = getStageChangeStats(stageInfo.stage);
-            
-            // Add lead count with change indicator
+
+            // Lead count on the right with change indicator
             let countText = `${stageInfo.count} leads`;
             if (changeStats.hasChanges) {
                 if (changeStats.newLeads > 0) {
@@ -895,45 +936,39 @@ function createFunnelVisualization() {
                     countText += ` (-${changeStats.removedLeads})`;
                 }
             }
-            
-            stageGroup.append('text')
-                .attr('x', x + topWidth / 2)
-                .attr('y', y + 45)
-                .attr('text-anchor', 'middle')
+
+            const countTextEl = stageGroup.append('text')
+                .attr('x', x + topWidth - 15)
+                .attr('y', textY)
+                .attr('text-anchor', 'end')
                 .attr('fill', changeStats.hasChanges ? '#28a745' : 'white')
-                .attr('font-size', '16px')
+                .attr('font-size', `${baseFont}px`)
                 .attr('font-weight', changeStats.hasChanges ? 'bold' : 'normal')
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(countText);
-            
-            // Add weighted value (white text with shadow) - Made bigger
-            stageGroup.append('text')
-                .attr('x', x + topWidth / 2)
-                .attr('y', y + 65)
-                .attr('text-anchor', 'middle')
-                .attr('fill', 'white')
-                .attr('font-weight', 'bold')
-                .attr('font-size', '16px')
-                .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
-                .text(formatCurrency(stageInfo.weightedValue));
+
+            // Adjust text size if necessary to prevent overlap
+            adjustTextSize(valueText, sectionWidth);
+            adjustTextSize(nameText, sectionWidth);
+            adjustTextSize(countTextEl, sectionWidth);
             
             // Add change indicators if there are recent changes
             if (changeStats.hasChanges) {
                 // Add a small indicator dot
                 stageGroup.append('circle')
-                    .attr('cx', x + topWidth - 20)
+                    .attr('cx', x + topWidth - 25)
                     .attr('cy', y + 20)
-                    .attr('r', 8)
+                    .attr('r', 14)
                     .attr('fill', '#ffc107')
                     .attr('stroke', '#e0a800')
                     .attr('stroke-width', 1);
-                
-                // Add change count inside the dot
-                const totalChanges = changeStats.newLeads + changeStats.removedLeads + changeStats.stageChanges;
+
+                // Add change count inside the dot (new and removed leads only)
+                const totalChanges = changeStats.newLeads + changeStats.removedLeads;
                 if (totalChanges > 0) {
                     stageGroup.append('text')
-                        .attr('x', x + topWidth - 20)
-                        .attr('y', y + 25)
+                        .attr('x', x + topWidth - 25)
+                        .attr('y', y + 26)
                         .attr('text-anchor', 'middle')
                         .attr('fill', 'white')
                         .attr('font-size', '12px')
@@ -942,46 +977,44 @@ function createFunnelVisualization() {
                 }
             }
         });
-        
+
         // Add movement arrows between stages - positioned on the right side
         const movements = getStageMovements();
         movements.forEach(movement => {
-            // Find the source and target stage positions
             const fromStageIndex = stageData.findIndex(s => s.stage === movement.fromStage);
             const toStageIndex = stageData.findIndex(s => s.stage === movement.toStage);
-            
+            const isClosedWon = defaultSettings.closedWonStage === movement.toStage;
+            const isLost = defaultSettings.lostStages.includes(movement.toStage);
+
             if (fromStageIndex !== -1 && toStageIndex !== -1 && fromStageIndex !== toStageIndex) {
-                const fromStage = stageData[fromStageIndex];
-                const toStage = stageData[toStageIndex];
-                
-                // Calculate positions for the arrow - on the right side of the funnel
                 const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
                 const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
-                
-                // Position arrows on the right side with some padding
-                const arrowX = width - margin.right + 20;
-                const controlPoint1X = arrowX + 30;
-                const controlPoint2X = arrowX + 30;
-                
-                // Create arrow path
+
+                let arrowX = width - margin.right + 40 + (movement.offset || 0);
+                const maxArrowX = width - 40;
+                if (arrowX > maxArrowX) arrowX = maxArrowX;
+
                 const arrowGroup = svg.append('g')
                     .attr('class', 'movement-arrow');
-                
-                // Curved arrow path
-                const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${fromY} ${controlPoint2X} ${toY} ${arrowX} ${toY}`;
-                
+
+                const controlPoint1X = Math.min(arrowX + 40, width - 20);
+                const controlPoint1Y = fromY;
+                const controlPoint2X = arrowX;
+                const controlPoint2Y = toY - 40;
+                const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${controlPoint1Y}, ${controlPoint2X} ${controlPoint2Y}, ${arrowX} ${toY}`;
+
                 arrowGroup.append('path')
                     .attr('d', pathData)
                     .attr('stroke', '#007bff')
                     .attr('stroke-width', 3)
                     .attr('fill', 'none')
                     .attr('stroke-dasharray', '5,5')
+                    .attr('stroke-linecap', 'round')
                     .attr('marker-end', 'url(#arrowhead)');
-                
-                // Movement count label - positioned on the curve
+
                 const midY = (fromY + toY) / 2;
-                const labelX = arrowX + 15;
-                
+                const labelX = Math.min(arrowX + 20, width - 60);
+
                 arrowGroup.append('circle')
                     .attr('cx', labelX)
                     .attr('cy', midY)
@@ -989,7 +1022,7 @@ function createFunnelVisualization() {
                     .attr('fill', '#007bff')
                     .attr('stroke', 'white')
                     .attr('stroke-width', 2);
-                
+
                 arrowGroup.append('text')
                     .attr('x', labelX)
                     .attr('y', midY + 4)
@@ -998,14 +1031,64 @@ function createFunnelVisualization() {
                     .attr('font-size', '10px')
                     .attr('font-weight', 'bold')
                     .text(movement.count > 9 ? '9+' : movement.count);
+            } else if (fromStageIndex !== -1 && (isClosedWon || isLost)) {
+                const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
+                let arrowX = width - margin.right + 40 + (movement.offset || 0);
+                const maxArrowX = width - 40;
+                if (arrowX > maxArrowX) arrowX = maxArrowX;
+                const endX = Math.min(arrowX + 60, width - 20);
+
+                const color = isClosedWon ? '#28a745' : '#dc3545';
+                const markerId = isClosedWon ? 'arrowhead-won' : 'arrowhead-lost';
+
+                const arrowGroup = svg.append('g')
+                    .attr('class', 'movement-arrow');
+
+                const pathData = `M ${arrowX} ${fromY} L ${endX} ${fromY}`;
+
+                arrowGroup.append('path')
+                    .attr('d', pathData)
+                    .attr('stroke', color)
+                    .attr('stroke-width', 3)
+                    .attr('fill', 'none')
+                    .attr('stroke-dasharray', '5,5')
+                    .attr('stroke-linecap', 'round')
+                    .attr('marker-end', `url(#${markerId})`);
+
+                const midX = (arrowX + endX) / 2;
+                arrowGroup.append('circle')
+                    .attr('cx', midX)
+                    .attr('cy', fromY)
+                    .attr('r', 12)
+                    .attr('fill', color)
+                    .attr('stroke', 'white')
+                    .attr('stroke-width', 2);
+
+                arrowGroup.append('text')
+                    .attr('x', midX)
+                    .attr('y', fromY + 4)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', 'white')
+                    .attr('font-size', '10px')
+                    .attr('font-weight', 'bold')
+                    .text(movement.count > 9 ? '9+' : movement.count);
+
+                arrowGroup.append('text')
+                    .attr('x', endX + 8)
+                    .attr('y', fromY + 4)
+                    .attr('fill', color)
+                    .attr('font-size', '14px')
+                    .attr('font-weight', 'bold')
+                    .text(isClosedWon ? '✓' : '✕');
             }
         });
-        
-        // Add arrow marker definition
-        svg.append('defs').append('marker')
+
+        // Add arrow marker definitions
+        const markerDefs = defs;
+        markerDefs.append('marker')
             .attr('id', 'arrowhead')
             .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 8)
+            .attr('refX', 5)
             .attr('refY', 0)
             .attr('orient', 'auto')
             .attr('markerWidth', 6)
@@ -1013,6 +1096,30 @@ function createFunnelVisualization() {
             .append('path')
             .attr('d', 'M0,-5L10,0L0,5')
             .attr('fill', '#007bff');
+
+        markerDefs.append('marker')
+            .attr('id', 'arrowhead-won')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 5)
+            .attr('refY', 0)
+            .attr('orient', 'auto')
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#28a745');
+
+        markerDefs.append('marker')
+            .attr('id', 'arrowhead-lost')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 5)
+            .attr('refY', 0)
+            .attr('orient', 'auto')
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#dc3545');
     }
 }
 
@@ -1434,7 +1541,7 @@ function showStageDetails(stageData) {
             <div class="change-summary-grid">
                 ${changeStats.newLeads > 0 ? `<div class="change-stat positive"><i class="fas fa-plus-circle"></i> <strong>${changeStats.newLeads}</strong> new leads ($${formatCurrency(changeStats.valueAdded)})</div>` : ''}
                 ${changeStats.removedLeads > 0 ? `<div class="change-stat negative"><i class="fas fa-minus-circle"></i> <strong>${changeStats.removedLeads}</strong> removed leads ($${formatCurrency(changeStats.valueRemoved)})</div>` : ''}
-                ${changeStats.stageChanges > 0 ? `<div class="change-stat neutral"><i class="fas fa-exchange-alt"></i> <strong>${changeStats.stageChanges}</strong> leads moved to this stage</div>` : ''}
+                ${changeStats.stageChanges > 0 ? `<div class="change-stat neutral"><i class="fas fa-exchange-alt"></i> <strong>${changeStats.stageChanges}</strong> leads moved from this stage</div>` : ''}
             </div>
         </div>
         ` : ''}
@@ -1648,6 +1755,19 @@ function loadDefaultSettings() {
     
     const closedWonValueFieldInput = document.getElementById('closedWonValueField');
     if (closedWonValueFieldInput) closedWonValueFieldInput.value = defaultSettings.closedWonValueField;
+
+    const lostStagesInput = document.getElementById('lostStages');
+    if (lostStagesInput && Array.isArray(defaultSettings.lostStages)) {
+        Array.from(lostStagesInput.options).forEach(option => {
+            option.selected = defaultSettings.lostStages.includes(option.value);
+        });
+    }
+
+    // Ensure excluded stages include closed/won and lost selections
+    if (defaultSettings.closedWonStage) excludedStages.add(defaultSettings.closedWonStage);
+    if (Array.isArray(defaultSettings.lostStages)) {
+        defaultSettings.lostStages.forEach(stage => excludedStages.add(stage));
+    }
     
     renderDefaultRules();
     updatePiggyBank();
@@ -1676,7 +1796,7 @@ async function populateDefaultStageValues() {
                         if (fieldValue.id == fieldId) {
                             // Handle the new API structure
                             let value = null;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                                     value = fieldValue.value.data?.text;
                                 } else if (fieldValue.value.type === 'text') {
@@ -1684,16 +1804,20 @@ async function populateDefaultStageValues() {
                                 } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
                                     value = fieldValue.value.data;
                                 } else if (fieldValue.value.type === 'dropdown-multi') {
-                                    if (Array.isArray(fieldValue.value.data)) {
-                                        value = fieldValue.value.data.join(', ');
-                                    } else if (typeof fieldValue.value.data === 'object') {
-                                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                                    const data = fieldValue.value.data;
+                                    if (Array.isArray(data)) {
+                                        value = data.join(', ');
+                                    } else if (data && typeof data === 'object') {
+                                        const texts = Object.values(data).filter(val => typeof val === 'string');
                                         value = texts.join(', ');
+                                    } else if (data != null) {
+                                        value = String(data);
                                     } else {
-                                        value = String(fieldValue.value.data);
+                                        value = '';
                                     }
                                 } else {
-                                    value = String(fieldValue.value.data);
+                                    const data = fieldValue.value.data;
+                                    value = data != null ? String(data) : '';
                                 }
                             } else {
                                 // Fallback to old structure
@@ -1816,6 +1940,32 @@ function populateClosedWonStageValues() {
     }
 }
 
+// Populate lost stage values
+function populateLostStageValues() {
+    const valueSelect = document.getElementById('lostStages');
+    if (!currentData || !valueSelect) return;
+
+    // Clear existing options
+    valueSelect.innerHTML = '<option value="">Select stage value...</option>';
+
+    const stageValues = new Set();
+    currentData.leads.forEach(lead => {
+        if (lead.stage) {
+            stageValues.add(lead.stage);
+        }
+    });
+
+    Array.from(stageValues).sort().forEach(stage => {
+        const option = document.createElement('option');
+        option.value = stage;
+        option.textContent = stage;
+        if (defaultSettings.lostStages.includes(stage)) {
+            option.selected = true;
+        }
+        valueSelect.appendChild(option);
+    });
+}
+
 // Handle rule field change to populate value dropdown
 async function onRuleFieldChange() {
     const fieldName = document.getElementById('ruleField').value;
@@ -1847,7 +1997,7 @@ async function onRuleFieldChange() {
                         if (fieldValue.id == field.id) {
                             // Handle the new API structure
                             let value = null;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                                     value = fieldValue.value.data?.text;
                                 } else if (fieldValue.value.type === 'text') {
@@ -1855,16 +2005,20 @@ async function onRuleFieldChange() {
                                 } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
                                     value = fieldValue.value.data;
                                 } else if (fieldValue.value.type === 'dropdown-multi') {
-                                    if (Array.isArray(fieldValue.value.data)) {
-                                        value = fieldValue.value.data.join(', ');
-                                    } else if (typeof fieldValue.value.data === 'object') {
-                                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                                    const data = fieldValue.value.data;
+                                    if (Array.isArray(data)) {
+                                        value = data.join(', ');
+                                    } else if (data && typeof data === 'object') {
+                                        const texts = Object.values(data).filter(val => typeof val === 'string');
                                         value = texts.join(', ');
+                                    } else if (data != null) {
+                                        value = String(data);
                                     } else {
-                                        value = String(fieldValue.value.data);
+                                        value = '';
                                     }
                                 } else {
-                                    value = String(fieldValue.value.data);
+                                    const data = fieldValue.value.data;
+                                    value = data != null ? String(data) : '';
                                 }
                             } else {
                                 // Fallback to old structure
@@ -1974,7 +2128,7 @@ async function onDefaultStageFieldChange() {
                         if (fieldValue.id == fieldId) {
                             // Handle the new API structure
                             let value = null;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                                     value = fieldValue.value.data?.text;
                                 } else if (fieldValue.value.type === 'text') {
@@ -1982,16 +2136,20 @@ async function onDefaultStageFieldChange() {
                                 } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
                                     value = fieldValue.value.data;
                                 } else if (fieldValue.value.type === 'dropdown-multi') {
-                                    if (Array.isArray(fieldValue.value.data)) {
-                                        value = fieldValue.value.data.join(', ');
-                                    } else if (typeof fieldValue.value.data === 'object') {
-                                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                                    const data = fieldValue.value.data;
+                                    if (Array.isArray(data)) {
+                                        value = data.join(', ');
+                                    } else if (data && typeof data === 'object') {
+                                        const texts = Object.values(data).filter(val => typeof val === 'string');
                                         value = texts.join(', ');
+                                    } else if (data != null) {
+                                        value = String(data);
                                     } else {
-                                        value = String(fieldValue.value.data);
+                                        value = '';
                                     }
                                 } else {
-                                    value = String(fieldValue.value.data);
+                                    const data = fieldValue.value.data;
+                                    value = data != null ? String(data) : '';
                                 }
                             } else {
                                 // Fallback to old structure
@@ -2087,24 +2245,27 @@ async function onDefaultStageFieldChange() {
 }
 
 function updateDefaultSettings() {
+    const oldClosedWon = defaultSettings.closedWonStage;
+    const oldLost = Array.isArray(defaultSettings.lostStages) ? [...defaultSettings.lostStages] : [];
+
     defaultSettings.defaultStageField = document.getElementById('defaultStageField').value;
     defaultSettings.defaultStageValue = document.getElementById('defaultStageValue').value;
     defaultSettings.globalDefaultValue = parseFloat(document.getElementById('globalDefaultValue').value) || 1000000;
     defaultSettings.closedWonStage = document.getElementById('closedWonStage').value;
     defaultSettings.closedWonValueField = document.getElementById('closedWonValueField').value;
-    
+    const lostSelect = document.getElementById('lostStages');
+    defaultSettings.lostStages = lostSelect ? Array.from(lostSelect.selectedOptions).map(o => o.value).filter(v => v) : [];
+
+    // Update excluded stages
+    excludedStages.delete(oldClosedWon);
+    oldLost.forEach(stage => excludedStages.delete(stage));
+    if (defaultSettings.closedWonStage) excludedStages.add(defaultSettings.closedWonStage);
+    defaultSettings.lostStages.forEach(stage => excludedStages.add(stage));
+
     localStorage.setItem('defaultSettings', JSON.stringify(defaultSettings));
-    
+
     // Re-process data if we have current data
     if (currentData) {
-        // The original loadPipelineData calls processPipelineDataWithDefaults,
-        // which now fetches last contact info. We need to re-call loadPipelineData
-        // to ensure all data is processed correctly, including the new field.
-        // However, the current structure of loadPipelineData doesn't allow
-        // for a direct re-call here. A more robust solution would involve
-        // a separate function for re-processing or a flag to indicate
-        // if the data needs to be re-processed.
-        // For now, we'll just update the UI elements.
         updateVisualization();
         updateSummaryStats();
         updatePiggyBank();
@@ -2388,7 +2549,7 @@ async function processPipelineDataWithDefaults(data) {
             
             // Handle different value types from the new API structure
             let fieldValueData = null;
-            if (fieldValue.value && fieldValue.value.data) {
+            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                 // New API structure: value.data contains the actual value
                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                     fieldValueData = fieldValue.value.data?.text;
@@ -2398,14 +2559,17 @@ async function processPipelineDataWithDefaults(data) {
                     fieldValueData = fieldValue.value.data;
                 } else if (fieldValue.value.type === 'dropdown-multi') {
                     // Handle multi-select dropdowns - convert array to readable string
-                    if (Array.isArray(fieldValue.value.data)) {
-                        fieldValueData = fieldValue.value.data.join(', ');
-                    } else if (typeof fieldValue.value.data === 'object') {
+                    const data = fieldValue.value.data;
+                    if (Array.isArray(data)) {
+                        fieldValueData = data.join(', ');
+                    } else if (data && typeof data === 'object') {
                         // If it's an object with text properties, extract them
-                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                        const texts = Object.values(data).filter(val => typeof val === 'string');
                         fieldValueData = texts.join(', ');
+                    } else if (data != null) {
+                        fieldValueData = String(data);
                     } else {
-                        fieldValueData = String(fieldValue.value.data);
+                        fieldValueData = '';
                     }
                 } else if (fieldValue.value.type === 'interaction') {
                     // For relationship-intelligence fields, get the date
@@ -2526,20 +2690,18 @@ async function processPipelineDataWithDefaults(data) {
         }
         
         if (leadData.stage) {
-            // Check if this is a closed/won stage
             const isClosedWon = defaultSettings.closedWonStage === leadData.stage;
-            
+            const isLost = defaultSettings.lostStages.includes(leadData.stage);
+
             if (isClosedWon) {
                 console.log(`Processing closed/won lead ${lead.id} with stage: ${leadData.stage}`);
-                // For closed/won leads, use the specified value field for committed amount
                 if (defaultSettings.closedWonValueField) {
                     fieldValues.forEach(fieldValue => {
                         const fieldId = fieldValue.id;
                         const field = data.fields.find(f => f.id == fieldId);
                         if (field && field.name === defaultSettings.closedWonValueField) {
-                            // Handle new API structure for value extraction
                             let closedWonValue = 0;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 closedWonValue = parseFloat(fieldValue.value.data) || 0;
                             } else {
                                 closedWonValue = parseFloat(fieldValue.value) || 0;
@@ -2547,20 +2709,21 @@ async function processPipelineDataWithDefaults(data) {
                             if (closedWonValue > 0) {
                                 leadData.value = closedWonValue;
                                 console.log(`Set closed/won value for lead ${lead.id}: ${closedWonValue}`);
-                                // Don't add to totalValue as closed/won leads are tracked separately
                             }
                         }
                     });
                 }
-            } else {
-                // Only add to totalValue for non-closed/won leads
+            } else if (!isLost) {
                 processed.totalValue += leadData.value;
             }
-            
-            processed.stages.add(leadData.stage);
+
+            if (!isClosedWon && !isLost) {
+                processed.stages.add(leadData.stage);
+            }
+
             processed.leads.push(leadData);
             processed.totalLeads++;
-            
+
             if (leadData.source) {
                 processed.sources.add(leadData.source);
             }
@@ -3621,15 +3784,17 @@ function searchHistoricalChanges() {
         return;
     }
     
-    if (startDate > endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (start > end) {
         showNotification('Start date must be before end date', 'error');
         return;
     }
-    
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+
+    start.setHours(0, 0, 0, 0); // Normalize to start of day
     end.setHours(23, 59, 59, 999); // Include the entire end date
-    
+
     console.log('Date range:', { start: start.toISOString(), end: end.toISOString() });
     
     // Get the stage field ID from current data or user selection
@@ -3774,93 +3939,148 @@ function analyzeHistoricalChanges(startDate, endDate, options) {
 }
 
 async function getFieldValueChanges(fieldId, startDate, endDate, options) {
-    console.log('getFieldValueChanges called with:', { fieldId, startDate, endDate, options });
-    
+    const normalizedFieldId = String(fieldId).replace(/^field-/, '');
+    console.log('getFieldValueChanges called with:', {
+        fieldId: normalizedFieldId,
+        startDate,
+        endDate,
+        options
+    });
+
+    if (!currentData || !currentData.leads) {
+        showNotification('No pipeline data loaded. Please load pipeline data first.', 'error');
+        return;
+    }
+
     try {
-        // Get all field value changes for the stage field
-        const response = await fetch(`/api/field-value-changes?field_id=${fieldId}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const fieldValueChanges = await response.json();
-        console.log('Field value changes from API:', fieldValueChanges);
-        
-        // Filter changes by date range
-        const filteredChanges = fieldValueChanges.filter(change => {
-            const changeDate = new Date(change.changed_at);
-            return changeDate >= startDate && changeDate <= endDate;
-        });
-        
-        console.log('Filtered changes in date range:', filteredChanges);
-        
-        // Process the changes to match our expected format
-        const processedChanges = processFieldValueChanges(filteredChanges, options);
-        
+        const changesByLead = {};
+
+        // Fetch field value changes for each lead in parallel
+        await Promise.all(currentData.leads.map(async lead => {
+            try {
+                const resp = await fetch(`/api/field-value-changes?field_id=${normalizedFieldId}&list_entry_id=${lead.id}`);
+                if (!resp.ok) {
+                    throw new Error(`HTTP error! status: ${resp.status}`);
+                }
+                const leadChanges = await resp.json();
+                if (!Array.isArray(leadChanges)) return;
+                changesByLead[lead.id] = leadChanges.map(change => ({ change, lead }));
+            } catch (err) {
+                console.error('Error fetching changes for lead', lead.id, err);
+            }
+        }));
+
+        const processedChanges = processFieldValueChanges(changesByLead, startDate, endDate, options);
         console.log('Processed changes:', processedChanges);
-        
+
+        // Cache raw and processed changes for reconstructing pipeline snapshots
+        lastFieldValueChanges = { changesByLead, startDate, endDate };
+        lastProcessedChanges = processedChanges;
+
         displayHistoricalResults(processedChanges, startDate, endDate);
-        
     } catch (error) {
         console.error('Error fetching field value changes:', error);
         showNotification('Failed to fetch field value changes: ' + error.message, 'error');
     }
 }
 
-function processFieldValueChanges(fieldValueChanges, options) {
+function processFieldValueChanges(changesByLead, startDate, endDate, options) {
     const changes = [];
-    
-    fieldValueChanges.forEach(change => {
-        const changeDate = new Date(change.changed_at);
-        
-        // Map action types to our change types
-        // 0 = Create, 1 = Delete, 2 = Update
-        if (change.action_type === 0 && options.includeNewLeads) {
-            // Create - new lead added to stage
-            changes.push({
-                type: 'new_lead',
-                leadId: change.entity_id,
-                leadName: `Lead ${change.entity_id}`, // We'll need to get the actual name
-                stage: change.value?.text || 'Unknown Stage',
-                value: 0, // We'll need to get the actual value
-                timestamp: change.changed_at,
-                changeDate: changeDate,
-                actionType: 'create',
-                changer: change.changer
-            });
-        } else if (change.action_type === 1 && options.includeRemovedLeads) {
-            // Delete - lead removed from stage
-            changes.push({
-                type: 'removed_lead',
-                leadId: change.entity_id,
-                leadName: `Lead ${change.entity_id}`, // We'll need to get the actual name
-                stage: change.value?.text || 'Unknown Stage',
-                value: 0, // We'll need to get the actual value
-                timestamp: change.changed_at,
-                changeDate: changeDate,
-                actionType: 'delete',
-                changer: change.changer
-            });
-        } else if (change.action_type === 2 && options.includeStageChanges) {
-            // Update - stage change (we'll need to determine old vs new value)
-            changes.push({
-                type: 'stage_change',
-                leadId: change.entity_id,
-                leadName: `Lead ${change.entity_id}`, // We'll need to get the actual name
-                oldStage: 'Previous Stage', // We'll need to determine this
-                newStage: change.value?.text || 'Unknown Stage',
-                value: 0, // We'll need to get the actual value
-                timestamp: change.changed_at,
-                changeDate: changeDate,
-                actionType: 'update',
-                changer: change.changer
-            });
-        }
+
+    Object.values(changesByLead).forEach(leadChanges => {
+        // Sort by change time to track stage transitions
+        leadChanges.sort((a, b) => new Date(a.change.changed_at) - new Date(b.change.changed_at));
+        let previousStage = null;
+        const leadEvents = [];
+
+        leadChanges.forEach(({ change, lead }) => {
+            const changeDate = new Date(change.changed_at);
+
+            // Update stage context even if we're outside the range
+            if (changeDate < startDate) {
+                if (change.action_type === 0 || change.action_type === 2) {
+                    previousStage = change.value?.text || previousStage;
+                } else if (change.action_type === 1) {
+                    previousStage = null;
+                }
+                return;
+            }
+
+            if (changeDate > endDate) {
+                return;
+            }
+
+            const leadName = getLeadDisplayName(lead);
+            const value = lead.value || 0;
+
+            if (change.action_type === 0 && options.includeNewLeads) {
+                const stage = change.value?.text || 'Unknown Stage';
+                leadEvents.push({
+                    type: 'new_lead',
+                    leadId: lead.id,
+                    leadName,
+                    stage,
+                    value,
+                    timestamp: change.changed_at,
+                    changeDate,
+                    actionType: 'create',
+                    changer: change.changer
+                });
+                previousStage = stage;
+            } else if (change.action_type === 1 && options.includeRemovedLeads) {
+                leadEvents.push({
+                    type: 'removed_lead',
+                    leadId: lead.id,
+                    leadName,
+                    stage: previousStage || 'Unknown Stage',
+                    value,
+                    timestamp: change.changed_at,
+                    changeDate,
+                    actionType: 'delete',
+                    changer: change.changer
+                });
+                previousStage = null;
+            } else if (change.action_type === 2 && options.includeStageChanges) {
+                const newStage = change.value?.text || 'Unknown Stage';
+                leadEvents.push({
+                    type: 'stage_change',
+                    leadId: lead.id,
+                    leadName,
+                    oldStage: previousStage || 'Unknown Stage',
+                    newStage,
+                    value,
+                    timestamp: change.changed_at,
+                    changeDate,
+                    actionType: 'update',
+                    changer: change.changer
+                });
+                previousStage = newStage;
+            } else {
+                // Keep track of stage even if we don't include the change
+                if (change.action_type === 0 || change.action_type === 2) {
+                    previousStage = change.value?.text || previousStage;
+                } else if (change.action_type === 1) {
+                    previousStage = null;
+                }
+            }
+        });
+
+        // Apply final stage to all recorded events for this lead
+        leadEvents.forEach(evt => {
+            evt.finalStage = previousStage;
+        });
+        changes.push(...leadEvents);
     });
-    
+
     // Sort by timestamp (newest first)
     return changes.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+function getLeadDisplayName(lead) {
+    return lead?.entity?.name ||
+           lead?.entity?.properties?.name ||
+           [lead?.entity?.first_name, lead?.entity?.last_name].filter(Boolean).join(' ') ||
+           `Lead ${lead?.entity_id || lead?.id}`;
 }
 
 async function showAvailableSnapshots() {
@@ -3896,7 +4116,8 @@ async function showAvailableSnapshots() {
     
     try {
         // Get all field value changes for the stage field
-        const response = await fetch(`/api/field-value-changes?field_id=${stageField.id}`);
+        const fieldId = String(stageField.id).replace(/^field-/, '');
+        const response = await fetch(`/api/field-value-changes?field_id=${fieldId}`);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -4068,40 +4289,80 @@ function displayHistoricalResults(changes, startDate, endDate) {
     }
 }
 
+// Build a pipeline snapshot for a specific date using cached field value changes
+function buildPipelineSnapshotFromChanges(changesByLead, targetDate) {
+    if (!currentData) return null;
+
+    const snapshot = JSON.parse(JSON.stringify(currentData));
+    const stageSet = new Set();
+    const target = new Date(targetDate);
+
+    snapshot.leads = currentData.leads.map(lead => {
+        const history = (changesByLead[lead.id] || []).map(c => c.change)
+            .sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
+
+        let stage = null;
+        let exists = true;
+
+        if (history.length === 0) {
+            stage = lead.stage;
+        } else {
+            exists = false;
+            for (const change of history) {
+                const changeDate = new Date(change.changed_at);
+                if (changeDate > target) break;
+
+                if (change.action_type === 0 || change.action_type === 2) {
+                    exists = true;
+                    stage = change.value?.text || stage;
+                } else if (change.action_type === 1) {
+                    exists = false;
+                    stage = null;
+                }
+            }
+        }
+
+        if (!exists || !stage) return null;
+        const leadCopy = { ...lead, stage };
+        stageSet.add(stage);
+        return leadCopy;
+    }).filter(Boolean);
+
+    snapshot.stages = Array.from(stageSet);
+    snapshot.totalLeads = snapshot.leads.length;
+    snapshot.totalValue = snapshot.leads.reduce((sum, l) => sum + (l.value || 0), 0);
+    snapshot.timestamp = target.toISOString();
+    return snapshot;
+}
+
 function applyHistoricalChanges(startDate, endDate) {
     console.log('applyHistoricalChanges called with:', { startDate, endDate });
-    
-    // Find the most recent snapshot in the date range
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    const relevantSnapshots = pipelineHistory.filter(snapshot => {
-        const snapshotDate = new Date(snapshot.timestamp);
-        return snapshotDate >= start && snapshotDate <= end;
-    });
-    
-    if (relevantSnapshots.length === 0) {
-        showNotification('No snapshots found for the selected period', 'error');
+
+    if (!lastFieldValueChanges) {
+        showNotification('No historical change data available', 'error');
         return;
     }
-    
-    // Use the most recent snapshot in the range
-    const targetSnapshot = relevantSnapshots[relevantSnapshots.length - 1];
-    console.log('Applying historical snapshot:', targetSnapshot.timestamp);
-    
+
+    const end = new Date(endDate);
+
+    const snapshot = buildPipelineSnapshotFromChanges(lastFieldValueChanges.changesByLead, end);
+    if (!snapshot) {
+        showNotification('Unable to build snapshot for the selected period', 'error');
+        return;
+    }
+
     // Store current data for reverting
     if (!historicalMode) {
         historicalSnapshot = { ...currentData };
     }
-    
-    // Apply historical data
-    currentData = { ...targetSnapshot };
+
+    currentData = snapshot;
     historicalMode = true;
-    
+
     // Update the UI
     updateVisualization();
     updateSummaryStats();
-    
+
     // Add revert button to the pipeline changes section
     const revertBtn = document.getElementById('revertToCurrent');
     if (!revertBtn) {
@@ -4115,10 +4376,10 @@ function applyHistoricalChanges(startDate, endDate) {
             changeControls.appendChild(revertButton);
         }
     }
-    
-    showNotification(`Showing pipeline as of ${new Date(targetSnapshot.timestamp).toLocaleDateString()}`, 'success');
+
+    showNotification(`Showing pipeline as of ${end.toLocaleDateString()}`, 'success');
     closeHistoricalSearchModal();
-    
+
     // Update the change history display to show historical mode
     updateChangeHistoryDisplay();
 }
@@ -4130,6 +4391,7 @@ function revertToCurrentData() {
         currentData = { ...historicalSnapshot };
         historicalMode = false;
         historicalSnapshot = null;
+        lastProcessedChanges = null;
         
         // Update the UI
         updateVisualization();
@@ -4250,6 +4512,49 @@ function clearLocalStorageIfNeeded() {
 
 // Change analysis functions for funnel visualization
 function getStageChangeStats(stageName) {
+    // When viewing a historical period, derive stats from processed changes
+    if (historicalMode && Array.isArray(lastProcessedChanges)) {
+        const newLeadIds = new Set();
+        const removedLeadIds = new Set();
+        const passedThroughIds = new Set();
+        let valueAdded = 0;
+        let valueRemoved = 0;
+
+        lastProcessedChanges.forEach(change => {
+            const finalStage = currentData.leads.find(lead =>
+                (lead.id == change.leadId || lead.entity_id == change.leadId)
+            )?.stage;
+
+            if (change.type === 'removed_lead' && change.stage === stageName) {
+                removedLeadIds.add(change.leadId);
+                valueRemoved += change.value || 0;
+            } else if (finalStage === stageName) {
+                if (change.type === 'new_lead' && change.stage === stageName) {
+                    newLeadIds.add(change.leadId);
+                    valueAdded += change.value || 0;
+                } else if (change.type === 'stage_change' && change.newStage === stageName) {
+                    newLeadIds.add(change.leadId);
+                    valueAdded += change.value || 0;
+                }
+            } else {
+                if (change.type === 'stage_change' && change.oldStage === stageName) {
+                    passedThroughIds.add(change.leadId);
+                } else if (change.type === 'new_lead' && change.stage === stageName) {
+                    passedThroughIds.add(change.leadId);
+                }
+            }
+        });
+
+        return {
+            newLeads: newLeadIds.size,
+            removedLeads: removedLeadIds.size,
+            stageChanges: passedThroughIds.size,
+            valueAdded,
+            valueRemoved,
+            hasChanges: newLeadIds.size > 0 || removedLeadIds.size > 0
+        };
+    }
+
     if (pipelineHistory.length < 2) {
         return {
             newLeads: 0,
@@ -4260,53 +4565,84 @@ function getStageChangeStats(stageName) {
             hasChanges: false
         };
     }
-    
+
     const recentChanges = [];
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 7);
-    
+
     // Get changes from the last 7 days
     for (let i = 1; i < pipelineHistory.length; i++) {
         const currentSnapshot = pipelineHistory[i];
         const previousSnapshot = pipelineHistory[i - 1];
-        
+
         const snapshotDate = new Date(currentSnapshot.timestamp);
         if (snapshotDate > cutoffDate) {
             const changes = detectPipelineChanges(currentSnapshot, previousSnapshot);
             recentChanges.push(...changes);
         }
     }
-    
-    // Filter changes for this specific stage - only count where leads CURRENTLY are
-    const stageChanges = recentChanges.filter(change => {
-        if (change.type === 'new_lead') {
-            // Only count if the lead is still in this stage (not moved away)
-            const leadStillHere = currentData.leads.some(lead => 
-                lead.id == change.leadId && lead.stage === stageName
-            );
-            return change.stage === stageName && leadStillHere;
-        } else if (change.type === 'removed_lead') {
-            return change.stage === stageName;
-        } else if (change.type === 'stage_change') {
-            // Only count if the lead is CURRENTLY in this stage
-            return change.newStage === stageName;
+
+    const newLeadIds = new Set();
+    const removedLeadIds = new Set();
+    const passedThroughIds = new Set();
+    let valueAdded = 0;
+    let valueRemoved = 0;
+
+    recentChanges.forEach(change => {
+        const finalStage = currentData.leads.find(lead => lead.id == change.leadId)?.stage;
+
+        if (change.type === 'removed_lead' && change.stage === stageName) {
+            removedLeadIds.add(change.leadId);
+            valueRemoved += change.value;
+        } else if (finalStage === stageName) {
+            if (change.type === 'new_lead' && change.stage === stageName) {
+                newLeadIds.add(change.leadId);
+                valueAdded += change.value;
+            } else if (change.type === 'stage_change' && change.newStage === stageName) {
+                newLeadIds.add(change.leadId);
+                valueAdded += change.value;
+            }
+        } else {
+            if (change.type === 'stage_change' && change.oldStage === stageName) {
+                passedThroughIds.add(change.leadId);
+            } else if (change.type === 'new_lead' && change.stage === stageName) {
+                passedThroughIds.add(change.leadId);
+            }
         }
-        return false;
     });
-    
-    const stats = {
-        newLeads: stageChanges.filter(c => c.type === 'new_lead').length,
-        removedLeads: stageChanges.filter(c => c.type === 'removed_lead').length,
-        stageChanges: stageChanges.filter(c => c.type === 'stage_change' && c.newStage === stageName).length,
-        valueAdded: stageChanges.filter(c => c.type === 'new_lead').reduce((sum, c) => sum + c.value, 0),
-        valueRemoved: stageChanges.filter(c => c.type === 'removed_lead').reduce((sum, c) => sum + c.value, 0),
-        hasChanges: stageChanges.length > 0
+
+    return {
+        newLeads: newLeadIds.size,
+        removedLeads: removedLeadIds.size,
+        stageChanges: passedThroughIds.size,
+        valueAdded,
+        valueRemoved,
+        hasChanges: newLeadIds.size > 0 || removedLeadIds.size > 0
     };
-    
-    return stats;
 }
 
 function getLeadChangeInfo(leadId) {
+    if (historicalMode && Array.isArray(lastProcessedChanges)) {
+        const leadChanges = lastProcessedChanges.filter(change => change.leadId == leadId);
+        if (leadChanges.length === 0) {
+            return {
+                isNew: false,
+                isMoved: false,
+                oldStage: null,
+                changeDate: null,
+                changeType: null
+            };
+        }
+        const latestChange = leadChanges[0];
+        return {
+            isNew: latestChange.type === 'new_lead',
+            isMoved: latestChange.type === 'stage_change',
+            oldStage: latestChange.type === 'stage_change' ? latestChange.oldStage : null,
+            changeDate: latestChange.changeDate || new Date(latestChange.timestamp),
+            changeType: latestChange.type
+        };
+    }
+
     if (pipelineHistory.length < 2) {
         return {
             isNew: false,
@@ -4316,26 +4652,26 @@ function getLeadChangeInfo(leadId) {
             changeType: null
         };
     }
-    
+
     const recentChanges = [];
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 7);
-    
+
     // Get changes from the last 7 days
     for (let i = 1; i < pipelineHistory.length; i++) {
         const currentSnapshot = pipelineHistory[i];
         const previousSnapshot = pipelineHistory[i - 1];
-        
+
         const snapshotDate = new Date(currentSnapshot.timestamp);
         if (snapshotDate > cutoffDate) {
             const changes = detectPipelineChanges(currentSnapshot, previousSnapshot);
             recentChanges.push(...changes);
         }
     }
-    
+
     // Find changes for this specific lead
     const leadChanges = recentChanges.filter(change => change.leadId == leadId);
-    
+
     if (leadChanges.length === 0) {
         return {
             isNew: false,
@@ -4345,9 +4681,9 @@ function getLeadChangeInfo(leadId) {
             changeType: null
         };
     }
-    
+
     const latestChange = leadChanges[0]; // Most recent change
-    
+
     return {
         isNew: latestChange.type === 'new_lead',
         isMoved: latestChange.type === 'stage_change',
@@ -4372,77 +4708,102 @@ function formatChangeDate(date) {
 }
 
 function getStageMovements() {
+    // When viewing a historical period, compute movements from processed changes
+    if (historicalMode && Array.isArray(lastProcessedChanges)) {
+        const stageChanges = lastProcessedChanges.filter(c => c.type === 'stage_change');
+        const movementGroups = {};
+        const laneOffsets = {};
+
+        stageChanges.forEach(change => {
+            const laneKey = change.finalStage || 'removed';
+            const key = `${change.oldStage}->${change.newStage}->${laneKey}`;
+            if (!movementGroups[key]) {
+                movementGroups[key] = {
+                    fromStage: change.oldStage,
+                    toStage: change.newStage,
+                    finalStage: change.finalStage,
+                    count: 0,
+                    totalValue: 0,
+                    movements: []
+                };
+            }
+            movementGroups[key].count++;
+            movementGroups[key].totalValue += change.value || 0;
+            movementGroups[key].movements.push({
+                fromStage: change.oldStage,
+                toStage: change.newStage,
+                leadId: change.leadId,
+                leadName: change.leadName,
+                value: change.value,
+                timestamp: change.timestamp,
+                changeDate: change.changeDate,
+                finalStage: change.finalStage
+            });
+        });
+
+        const groups = Object.values(movementGroups);
+        groups.forEach(group => {
+            const laneKey = group.finalStage || 'removed';
+            if (laneOffsets[laneKey] === undefined) {
+                laneOffsets[laneKey] = Object.keys(laneOffsets).length;
+            }
+            group.offset = laneOffsets[laneKey] * 40;
+        });
+
+        return groups;
+    }
+
     if (pipelineHistory.length < 2) {
         return [];
     }
-    
+
     const movements = [];
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 7);
-    
+
     // Get changes from the last 7 days
     for (let i = 1; i < pipelineHistory.length; i++) {
         const currentSnapshot = pipelineHistory[i];
         const previousSnapshot = pipelineHistory[i - 1];
-        
+
         const snapshotDate = new Date(currentSnapshot.timestamp);
         if (snapshotDate > cutoffDate) {
             const changes = detectPipelineChanges(currentSnapshot, previousSnapshot);
-            
+
             // Filter for stage changes only
             const stageChanges = changes.filter(change => change.type === 'stage_change');
-            
+
             stageChanges.forEach(change => {
-                const movement = {
+                movements.push({
                     fromStage: change.oldStage,
                     toStage: change.newStage,
                     leadId: change.leadId,
                     leadName: change.leadName,
                     value: change.value,
                     timestamp: change.timestamp
-                };
-                movements.push(movement);
+                });
             });
         }
     }
-    
-    // Group movements by from/to stage pairs, but only show final destinations
+
+    // Group all movements by from/to stage pairs
     const movementGroups = {};
-    const leadFinalDestinations = new Map(); // Track where each lead ended up
-    
-    // First pass: find final destination for each lead
     movements.forEach(movement => {
-        leadFinalDestinations.set(movement.leadId, {
-            fromStage: movement.fromStage,
-            toStage: movement.toStage,
-            value: movement.value,
-            timestamp: movement.timestamp
-        });
-    });
-    
-    // Second pass: group by final destinations only
-    leadFinalDestinations.forEach((finalMovement, leadId) => {
-        const key = `${finalMovement.fromStage}->${finalMovement.toStage}`;
+        const key = `${movement.fromStage}->${movement.toStage}`;
         if (!movementGroups[key]) {
             movementGroups[key] = {
-                fromStage: finalMovement.fromStage,
-                toStage: finalMovement.toStage,
+                fromStage: movement.fromStage,
+                toStage: movement.toStage,
                 count: 0,
                 totalValue: 0,
                 movements: []
             };
         }
         movementGroups[key].count++;
-        movementGroups[key].totalValue += finalMovement.value;
-        movementGroups[key].movements.push({
-            leadId: leadId,
-            fromStage: finalMovement.fromStage,
-            toStage: finalMovement.toStage,
-            value: finalMovement.value,
-            timestamp: finalMovement.timestamp
-        });
+        movementGroups[key].totalValue += movement.value || 0;
+        movementGroups[key].movements.push(movement);
     });
-    
+
     return Object.values(movementGroups);
 }
 

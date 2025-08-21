@@ -441,14 +441,17 @@ function processPipelineData(data) {
                     fieldValueData = fieldValue.value.data;
                 } else if (fieldValue.value.type === 'dropdown-multi') {
                     // Handle multi-select dropdowns - convert array to readable string
-                    if (Array.isArray(fieldValue.value.data)) {
-                        fieldValueData = fieldValue.value.data.join(', ');
-                    } else if (typeof fieldValue.value.data === 'object') {
+                    const data = fieldValue.value.data;
+                    if (Array.isArray(data)) {
+                        fieldValueData = data.join(', ');
+                    } else if (data && typeof data === 'object') {
                         // If it's an object with text properties, extract them
-                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                        const texts = Object.values(data).filter(val => typeof val === 'string');
                         fieldValueData = texts.join(', ');
+                    } else if (data != null) {
+                        fieldValueData = String(data);
                     } else {
-                        fieldValueData = String(fieldValue.value.data);
+                        fieldValueData = '';
                     }
                 } else if (fieldValue.value.type === 'interaction') {
                     // For relationship-intelligence fields, get the date
@@ -459,10 +462,13 @@ function processPipelineData(data) {
                     }
                 } else {
                     // For any other type, convert to string safely
-                    if (typeof fieldValue.value.data === 'object') {
-                        fieldValueData = JSON.stringify(fieldValue.value.data);
+                    const data = fieldValue.value.data;
+                    if (data && typeof data === 'object') {
+                        fieldValueData = JSON.stringify(data);
+                    } else if (data != null) {
+                        fieldValueData = String(data);
                     } else {
-                        fieldValueData = String(fieldValue.value.data);
+                        fieldValueData = '';
                     }
                 }
             } else {
@@ -1685,16 +1691,20 @@ async function populateDefaultStageValues() {
                                 } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
                                     value = fieldValue.value.data;
                                 } else if (fieldValue.value.type === 'dropdown-multi') {
-                                    if (Array.isArray(fieldValue.value.data)) {
-                                        value = fieldValue.value.data.join(', ');
-                                    } else if (typeof fieldValue.value.data === 'object') {
-                                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                                    const data = fieldValue.value.data;
+                                    if (Array.isArray(data)) {
+                                        value = data.join(', ');
+                                    } else if (data && typeof data === 'object') {
+                                        const texts = Object.values(data).filter(val => typeof val === 'string');
                                         value = texts.join(', ');
+                                    } else if (data != null) {
+                                        value = String(data);
                                     } else {
-                                        value = String(fieldValue.value.data);
+                                        value = '';
                                     }
                                 } else {
-                                    value = String(fieldValue.value.data);
+                                    const data = fieldValue.value.data;
+                                    value = data != null ? String(data) : '';
                                 }
                             } else {
                                 // Fallback to old structure
@@ -1856,16 +1866,20 @@ async function onRuleFieldChange() {
                                 } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
                                     value = fieldValue.value.data;
                                 } else if (fieldValue.value.type === 'dropdown-multi') {
-                                    if (Array.isArray(fieldValue.value.data)) {
-                                        value = fieldValue.value.data.join(', ');
-                                    } else if (typeof fieldValue.value.data === 'object') {
-                                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                                    const data = fieldValue.value.data;
+                                    if (Array.isArray(data)) {
+                                        value = data.join(', ');
+                                    } else if (data && typeof data === 'object') {
+                                        const texts = Object.values(data).filter(val => typeof val === 'string');
                                         value = texts.join(', ');
+                                    } else if (data != null) {
+                                        value = String(data);
                                     } else {
-                                        value = String(fieldValue.value.data);
+                                        value = '';
                                     }
                                 } else {
-                                    value = String(fieldValue.value.data);
+                                    const data = fieldValue.value.data;
+                                    value = data != null ? String(data) : '';
                                 }
                             } else {
                                 // Fallback to old structure
@@ -1983,16 +1997,20 @@ async function onDefaultStageFieldChange() {
                                 } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
                                     value = fieldValue.value.data;
                                 } else if (fieldValue.value.type === 'dropdown-multi') {
-                                    if (Array.isArray(fieldValue.value.data)) {
-                                        value = fieldValue.value.data.join(', ');
-                                    } else if (typeof fieldValue.value.data === 'object') {
-                                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                                    const data = fieldValue.value.data;
+                                    if (Array.isArray(data)) {
+                                        value = data.join(', ');
+                                    } else if (data && typeof data === 'object') {
+                                        const texts = Object.values(data).filter(val => typeof val === 'string');
                                         value = texts.join(', ');
+                                    } else if (data != null) {
+                                        value = String(data);
                                     } else {
-                                        value = String(fieldValue.value.data);
+                                        value = '';
                                     }
                                 } else {
-                                    value = String(fieldValue.value.data);
+                                    const data = fieldValue.value.data;
+                                    value = data != null ? String(data) : '';
                                 }
                             } else {
                                 // Fallback to old structure
@@ -2399,14 +2417,17 @@ async function processPipelineDataWithDefaults(data) {
                     fieldValueData = fieldValue.value.data;
                 } else if (fieldValue.value.type === 'dropdown-multi') {
                     // Handle multi-select dropdowns - convert array to readable string
-                    if (Array.isArray(fieldValue.value.data)) {
-                        fieldValueData = fieldValue.value.data.join(', ');
-                    } else if (typeof fieldValue.value.data === 'object') {
+                    const data = fieldValue.value.data;
+                    if (Array.isArray(data)) {
+                        fieldValueData = data.join(', ');
+                    } else if (data && typeof data === 'object') {
                         // If it's an object with text properties, extract them
-                        const texts = Object.values(fieldValue.value.data).filter(val => typeof val === 'string');
+                        const texts = Object.values(data).filter(val => typeof val === 'string');
                         fieldValueData = texts.join(', ');
+                    } else if (data != null) {
+                        fieldValueData = String(data);
                     } else {
-                        fieldValueData = String(fieldValue.value.data);
+                        fieldValueData = '';
                     }
                 } else if (fieldValue.value.type === 'interaction') {
                     // For relationship-intelligence fields, get the date

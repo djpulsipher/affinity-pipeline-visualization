@@ -22,6 +22,7 @@ let autoRefreshMinutes = 5; // Refresh every 5 minutes by default
 // Historical search functionality
 let historicalMode = false; // Whether we're viewing historical data
 let historicalSnapshot = null; // The historical snapshot being viewed
+let lastFieldValueChanges = null; // Cache of field value changes for building historical snapshots
 
 let defaultSettings = {
     defaultStageField: '',
@@ -3626,7 +3627,6 @@ function searchHistoricalChanges() {
         return;
     }
     
-    const start = new Date(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999); // Include the entire end date
     
@@ -3807,6 +3807,9 @@ async function getFieldValueChanges(fieldId, startDate, endDate, options) {
 
         const processedChanges = processFieldValueChanges(changesByLead, startDate, endDate, options);
         console.log('Processed changes:', processedChanges);
+
+        // Cache raw changes for reconstructing pipeline snapshots
+        lastFieldValueChanges = { changesByLead, startDate, endDate };
 
         displayHistoricalResults(processedChanges, startDate, endDate);
     } catch (error) {
@@ -4113,40 +4116,80 @@ function displayHistoricalResults(changes, startDate, endDate) {
     }
 }
 
+// Build a pipeline snapshot for a specific date using cached field value changes
+function buildPipelineSnapshotFromChanges(changesByLead, targetDate) {
+    if (!currentData) return null;
+
+    const snapshot = JSON.parse(JSON.stringify(currentData));
+    const stageSet = new Set();
+    const target = new Date(targetDate);
+
+    snapshot.leads = currentData.leads.map(lead => {
+        const history = (changesByLead[lead.id] || []).map(c => c.change)
+            .sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
+
+        let stage = null;
+        let exists = true;
+
+        if (history.length === 0) {
+            stage = lead.stage;
+        } else {
+            exists = false;
+            for (const change of history) {
+                const changeDate = new Date(change.changed_at);
+                if (changeDate > target) break;
+
+                if (change.action_type === 0 || change.action_type === 2) {
+                    exists = true;
+                    stage = change.value?.text || stage;
+                } else if (change.action_type === 1) {
+                    exists = false;
+                    stage = null;
+                }
+            }
+        }
+
+        if (!exists || !stage) return null;
+        const leadCopy = { ...lead, stage };
+        stageSet.add(stage);
+        return leadCopy;
+    }).filter(Boolean);
+
+    snapshot.stages = Array.from(stageSet);
+    snapshot.totalLeads = snapshot.leads.length;
+    snapshot.totalValue = snapshot.leads.reduce((sum, l) => sum + (l.value || 0), 0);
+    snapshot.timestamp = target.toISOString();
+    return snapshot;
+}
+
 function applyHistoricalChanges(startDate, endDate) {
     console.log('applyHistoricalChanges called with:', { startDate, endDate });
-    
-    // Find the most recent snapshot in the date range
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    const relevantSnapshots = pipelineHistory.filter(snapshot => {
-        const snapshotDate = new Date(snapshot.timestamp);
-        return snapshotDate >= start && snapshotDate <= end;
-    });
-    
-    if (relevantSnapshots.length === 0) {
-        showNotification('No snapshots found for the selected period', 'error');
+
+    if (!lastFieldValueChanges) {
+        showNotification('No historical change data available', 'error');
         return;
     }
-    
-    // Use the most recent snapshot in the range
-    const targetSnapshot = relevantSnapshots[relevantSnapshots.length - 1];
-    console.log('Applying historical snapshot:', targetSnapshot.timestamp);
-    
+
+    const end = new Date(endDate);
+
+    const snapshot = buildPipelineSnapshotFromChanges(lastFieldValueChanges.changesByLead, end);
+    if (!snapshot) {
+        showNotification('Unable to build snapshot for the selected period', 'error');
+        return;
+    }
+
     // Store current data for reverting
     if (!historicalMode) {
         historicalSnapshot = { ...currentData };
     }
-    
-    // Apply historical data
-    currentData = { ...targetSnapshot };
+
+    currentData = snapshot;
     historicalMode = true;
-    
+
     // Update the UI
     updateVisualization();
     updateSummaryStats();
-    
+
     // Add revert button to the pipeline changes section
     const revertBtn = document.getElementById('revertToCurrent');
     if (!revertBtn) {
@@ -4160,10 +4203,10 @@ function applyHistoricalChanges(startDate, endDate) {
             changeControls.appendChild(revertButton);
         }
     }
-    
-    showNotification(`Showing pipeline as of ${new Date(targetSnapshot.timestamp).toLocaleDateString()}`, 'success');
+
+    showNotification(`Showing pipeline as of ${end.toLocaleDateString()}`, 'success');
     closeHistoricalSearchModal();
-    
+
     // Update the change history display to show historical mode
     updateChangeHistoryDisplay();
 }

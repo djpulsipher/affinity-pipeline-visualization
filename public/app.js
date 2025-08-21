@@ -431,7 +431,7 @@ function processPipelineData(data) {
             
             // Handle different value types from the new API structure
             let fieldValueData = null;
-            if (fieldValue.value && fieldValue.value.data) {
+            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                 // New API structure: value.data contains the actual value
                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                     fieldValueData = fieldValue.value.data?.text;
@@ -1677,7 +1677,7 @@ async function populateDefaultStageValues() {
                         if (fieldValue.id == fieldId) {
                             // Handle the new API structure
                             let value = null;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                                     value = fieldValue.value.data?.text;
                                 } else if (fieldValue.value.type === 'text') {
@@ -1848,7 +1848,7 @@ async function onRuleFieldChange() {
                         if (fieldValue.id == field.id) {
                             // Handle the new API structure
                             let value = null;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                                     value = fieldValue.value.data?.text;
                                 } else if (fieldValue.value.type === 'text') {
@@ -1975,7 +1975,7 @@ async function onDefaultStageFieldChange() {
                         if (fieldValue.id == fieldId) {
                             // Handle the new API structure
                             let value = null;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                                     value = fieldValue.value.data?.text;
                                 } else if (fieldValue.value.type === 'text') {
@@ -2389,7 +2389,7 @@ async function processPipelineDataWithDefaults(data) {
             
             // Handle different value types from the new API structure
             let fieldValueData = null;
-            if (fieldValue.value && fieldValue.value.data) {
+            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                 // New API structure: value.data contains the actual value
                 if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
                     fieldValueData = fieldValue.value.data?.text;
@@ -2540,7 +2540,7 @@ async function processPipelineDataWithDefaults(data) {
                         if (field && field.name === defaultSettings.closedWonValueField) {
                             // Handle new API structure for value extraction
                             let closedWonValue = 0;
-                            if (fieldValue.value && fieldValue.value.data) {
+                            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
                                 closedWonValue = parseFloat(fieldValue.value.data) || 0;
                             } else {
                                 closedWonValue = parseFloat(fieldValue.value) || 0;

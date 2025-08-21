@@ -929,19 +929,19 @@ function createFunnelVisualization() {
             if (changeStats.hasChanges) {
                 // Add a small indicator dot
                 stageGroup.append('circle')
-                    .attr('cx', x + topWidth - 20)
+                    .attr('cx', x + topWidth - 25)
                     .attr('cy', y + 20)
-                    .attr('r', 8)
+                    .attr('r', 12)
                     .attr('fill', '#ffc107')
                     .attr('stroke', '#e0a800')
                     .attr('stroke-width', 1);
-                
-                // Add change count inside the dot
-                const totalChanges = changeStats.newLeads + changeStats.removedLeads + changeStats.stageChanges;
+
+                // Add change count inside the dot (new and removed leads only)
+                const totalChanges = changeStats.newLeads + changeStats.removedLeads;
                 if (totalChanges > 0) {
                     stageGroup.append('text')
-                        .attr('x', x + topWidth - 20)
-                        .attr('y', y + 25)
+                        .attr('x', x + topWidth - 25)
+                        .attr('y', y + 26)
                         .attr('text-anchor', 'middle')
                         .attr('fill', 'white')
                         .attr('font-size', '12px')
@@ -950,46 +950,48 @@ function createFunnelVisualization() {
                 }
             }
         });
-        
+
         // Add movement arrows between stages - positioned on the right side
         const movements = getStageMovements();
-        movements.forEach(movement => {
+        movements.forEach((movement, index) => {
             // Find the source and target stage positions
             const fromStageIndex = stageData.findIndex(s => s.stage === movement.fromStage);
             const toStageIndex = stageData.findIndex(s => s.stage === movement.toStage);
-            
+
             if (fromStageIndex !== -1 && toStageIndex !== -1 && fromStageIndex !== toStageIndex) {
                 const fromStage = stageData[fromStageIndex];
                 const toStage = stageData[toStageIndex];
-                
+
                 // Calculate positions for the arrow - on the right side of the funnel
                 const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
                 const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
-                
-                // Position arrows on the right side with some padding
-                const arrowX = width - margin.right + 20;
+
+                // Offset arrows horizontally to prevent overlap
+                const offset = index * 15;
+                const arrowX = width - margin.right + 20 + offset;
                 const controlPoint1X = arrowX + 30;
                 const controlPoint2X = arrowX + 30;
-                
+
                 // Create arrow path
                 const arrowGroup = svg.append('g')
                     .attr('class', 'movement-arrow');
-                
+
                 // Curved arrow path
                 const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${fromY} ${controlPoint2X} ${toY} ${arrowX} ${toY}`;
-                
+
                 arrowGroup.append('path')
                     .attr('d', pathData)
                     .attr('stroke', '#007bff')
                     .attr('stroke-width', 3)
                     .attr('fill', 'none')
                     .attr('stroke-dasharray', '5,5')
+                    .attr('stroke-linecap', 'round')
                     .attr('marker-end', 'url(#arrowhead)');
-                
+
                 // Movement count label - positioned on the curve
                 const midY = (fromY + toY) / 2;
                 const labelX = arrowX + 15;
-                
+
                 arrowGroup.append('circle')
                     .attr('cx', labelX)
                     .attr('cy', midY)
@@ -997,7 +999,7 @@ function createFunnelVisualization() {
                     .attr('fill', '#007bff')
                     .attr('stroke', 'white')
                     .attr('stroke-width', 2);
-                
+
                 arrowGroup.append('text')
                     .attr('x', labelX)
                     .attr('y', midY + 4)
@@ -1008,12 +1010,12 @@ function createFunnelVisualization() {
                     .text(movement.count > 9 ? '9+' : movement.count);
             }
         });
-        
+
         // Add arrow marker definition
         svg.append('defs').append('marker')
             .attr('id', 'arrowhead')
             .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 8)
+            .attr('refX', 10)
             .attr('refY', 0)
             .attr('orient', 'auto')
             .attr('markerWidth', 6)
@@ -4367,34 +4369,45 @@ function clearLocalStorageIfNeeded() {
 function getStageChangeStats(stageName) {
     // When viewing a historical period, derive stats from processed changes
     if (historicalMode && Array.isArray(lastProcessedChanges)) {
-        const stats = {
-            newLeads: 0,
-            removedLeads: 0,
-            stageChanges: 0,
-            valueAdded: 0,
-            valueRemoved: 0,
-            hasChanges: false
-        };
+        const newLeadIds = new Set();
+        const removedLeadIds = new Set();
+        const passedThroughIds = new Set();
+        let valueAdded = 0;
+        let valueRemoved = 0;
 
         lastProcessedChanges.forEach(change => {
-            if (change.type === 'new_lead' && change.stage === stageName) {
-                const leadStillHere = currentData.leads.some(lead =>
-                    (lead.id == change.leadId || lead.entity_id == change.leadId) && lead.stage === stageName
-                );
-                if (leadStillHere) {
-                    stats.newLeads++;
-                    stats.valueAdded += change.value || 0;
+            const finalStage = currentData.leads.find(lead =>
+                (lead.id == change.leadId || lead.entity_id == change.leadId)
+            )?.stage;
+
+            if (change.type === 'removed_lead' && change.stage === stageName) {
+                removedLeadIds.add(change.leadId);
+                valueRemoved += change.value || 0;
+            } else if (finalStage === stageName) {
+                if (change.type === 'new_lead' && change.stage === stageName) {
+                    newLeadIds.add(change.leadId);
+                    valueAdded += change.value || 0;
+                } else if (change.type === 'stage_change' && change.newStage === stageName) {
+                    newLeadIds.add(change.leadId);
+                    valueAdded += change.value || 0;
                 }
-            } else if (change.type === 'removed_lead' && change.stage === stageName) {
-                stats.removedLeads++;
-                stats.valueRemoved += change.value || 0;
-            } else if (change.type === 'stage_change' && change.newStage === stageName) {
-                stats.stageChanges++;
+            } else {
+                if (change.type === 'stage_change' && change.oldStage === stageName) {
+                    passedThroughIds.add(change.leadId);
+                } else if (change.type === 'new_lead' && change.stage === stageName) {
+                    passedThroughIds.add(change.leadId);
+                }
             }
         });
 
-        stats.hasChanges = stats.newLeads > 0 || stats.removedLeads > 0 || stats.stageChanges > 0;
-        return stats;
+        return {
+            newLeads: newLeadIds.size,
+            removedLeads: removedLeadIds.size,
+            stageChanges: passedThroughIds.size,
+            valueAdded,
+            valueRemoved,
+            hasChanges: newLeadIds.size > 0 || removedLeadIds.size > 0
+        };
     }
 
     if (pipelineHistory.length < 2) {
@@ -4424,33 +4437,43 @@ function getStageChangeStats(stageName) {
         }
     }
 
-    // Filter changes for this specific stage - only count where leads CURRENTLY are
-    const stageChanges = recentChanges.filter(change => {
-        if (change.type === 'new_lead') {
-            // Only count if the lead is still in this stage (not moved away)
-            const leadStillHere = currentData.leads.some(lead =>
-                lead.id == change.leadId && lead.stage === stageName
-            );
-            return change.stage === stageName && leadStillHere;
-        } else if (change.type === 'removed_lead') {
-            return change.stage === stageName;
-        } else if (change.type === 'stage_change') {
-            // Only count if the lead is CURRENTLY in this stage
-            return change.newStage === stageName;
+    const newLeadIds = new Set();
+    const removedLeadIds = new Set();
+    const passedThroughIds = new Set();
+    let valueAdded = 0;
+    let valueRemoved = 0;
+
+    recentChanges.forEach(change => {
+        const finalStage = currentData.leads.find(lead => lead.id == change.leadId)?.stage;
+
+        if (change.type === 'removed_lead' && change.stage === stageName) {
+            removedLeadIds.add(change.leadId);
+            valueRemoved += change.value;
+        } else if (finalStage === stageName) {
+            if (change.type === 'new_lead' && change.stage === stageName) {
+                newLeadIds.add(change.leadId);
+                valueAdded += change.value;
+            } else if (change.type === 'stage_change' && change.newStage === stageName) {
+                newLeadIds.add(change.leadId);
+                valueAdded += change.value;
+            }
+        } else {
+            if (change.type === 'stage_change' && change.oldStage === stageName) {
+                passedThroughIds.add(change.leadId);
+            } else if (change.type === 'new_lead' && change.stage === stageName) {
+                passedThroughIds.add(change.leadId);
+            }
         }
-        return false;
     });
 
-    const stats = {
-        newLeads: stageChanges.filter(c => c.type === 'new_lead').length,
-        removedLeads: stageChanges.filter(c => c.type === 'removed_lead').length,
-        stageChanges: stageChanges.filter(c => c.type === 'stage_change' && c.newStage === stageName).length,
-        valueAdded: stageChanges.filter(c => c.type === 'new_lead').reduce((sum, c) => sum + c.value, 0),
-        valueRemoved: stageChanges.filter(c => c.type === 'removed_lead').reduce((sum, c) => sum + c.value, 0),
-        hasChanges: stageChanges.length > 0
+    return {
+        newLeads: newLeadIds.size,
+        removedLeads: removedLeadIds.size,
+        stageChanges: passedThroughIds.size,
+        valueAdded,
+        valueRemoved,
+        hasChanges: newLeadIds.size > 0 || removedLeadIds.size > 0
     };
-
-    return stats;
 }
 
 function getLeadChangeInfo(leadId) {
@@ -4543,38 +4566,30 @@ function getStageMovements() {
     // When viewing a historical period, compute movements from processed changes
     if (historicalMode && Array.isArray(lastProcessedChanges)) {
         const stageChanges = lastProcessedChanges.filter(c => c.type === 'stage_change');
-        const latestMovementByLead = {};
+        const movementGroups = {};
 
         stageChanges.forEach(change => {
-            const existing = latestMovementByLead[change.leadId];
-            if (!existing || change.changeDate > existing.changeDate) {
-                latestMovementByLead[change.leadId] = {
-                    fromStage: change.oldStage,
-                    toStage: change.newStage,
-                    leadId: change.leadId,
-                    leadName: change.leadName,
-                    value: change.value,
-                    timestamp: change.timestamp,
-                    changeDate: change.changeDate
-                };
-            }
-        });
-
-        const movementGroups = {};
-        Object.values(latestMovementByLead).forEach(movement => {
-            const key = `${movement.fromStage}->${movement.toStage}`;
+            const key = `${change.oldStage}->${change.newStage}`;
             if (!movementGroups[key]) {
                 movementGroups[key] = {
-                    fromStage: movement.fromStage,
-                    toStage: movement.toStage,
+                    fromStage: change.oldStage,
+                    toStage: change.newStage,
                     count: 0,
                     totalValue: 0,
                     movements: []
                 };
             }
             movementGroups[key].count++;
-            movementGroups[key].totalValue += movement.value;
-            movementGroups[key].movements.push(movement);
+            movementGroups[key].totalValue += change.value || 0;
+            movementGroups[key].movements.push({
+                fromStage: change.oldStage,
+                toStage: change.newStage,
+                leadId: change.leadId,
+                leadName: change.leadName,
+                value: change.value,
+                timestamp: change.timestamp,
+                changeDate: change.changeDate
+            });
         });
 
         return Object.values(movementGroups);
@@ -4601,54 +4616,34 @@ function getStageMovements() {
             const stageChanges = changes.filter(change => change.type === 'stage_change');
 
             stageChanges.forEach(change => {
-                const movement = {
+                movements.push({
                     fromStage: change.oldStage,
                     toStage: change.newStage,
                     leadId: change.leadId,
                     leadName: change.leadName,
                     value: change.value,
                     timestamp: change.timestamp
-                };
-                movements.push(movement);
+                });
             });
         }
     }
 
-    // Group movements by from/to stage pairs, but only show final destinations
+    // Group all movements by from/to stage pairs
     const movementGroups = {};
-    const leadFinalDestinations = new Map(); // Track where each lead ended up
-
-    // First pass: find final destination for each lead
     movements.forEach(movement => {
-        leadFinalDestinations.set(movement.leadId, {
-            fromStage: movement.fromStage,
-            toStage: movement.toStage,
-            value: movement.value,
-            timestamp: movement.timestamp
-        });
-    });
-
-    // Second pass: group by final destinations only
-    leadFinalDestinations.forEach((finalMovement, leadId) => {
-        const key = `${finalMovement.fromStage}->${finalMovement.toStage}`;
+        const key = `${movement.fromStage}->${movement.toStage}`;
         if (!movementGroups[key]) {
             movementGroups[key] = {
-                fromStage: finalMovement.fromStage,
-                toStage: finalMovement.toStage,
+                fromStage: movement.fromStage,
+                toStage: movement.toStage,
                 count: 0,
                 totalValue: 0,
                 movements: []
             };
         }
         movementGroups[key].count++;
-        movementGroups[key].totalValue += finalMovement.value;
-        movementGroups[key].movements.push({
-            leadId: leadId,
-            fromStage: finalMovement.fromStage,
-            toStage: finalMovement.toStage,
-            value: finalMovement.value,
-            timestamp: finalMovement.timestamp
-        });
+        movementGroups[key].totalValue += movement.value || 0;
+        movementGroups[key].movements.push(movement);
     });
 
     return Object.values(movementGroups);

@@ -3643,14 +3643,17 @@ function searchHistoricalChanges() {
         return;
     }
     
-    if (startDate > endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (start > end) {
         showNotification('Start date must be before end date', 'error');
         return;
     }
-    
-    const end = new Date(endDate);
+
+    start.setHours(0, 0, 0, 0); // Normalize to start of day
     end.setHours(23, 59, 59, 999); // Include the entire end date
-    
+
     console.log('Date range:', { start: start.toISOString(), end: end.toISOString() });
     
     // Get the stage field ID from current data or user selection

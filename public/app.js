@@ -778,7 +778,7 @@ function createFunnelVisualization() {
         
         // Create SVG for funnel - Made responsive with container width
         const width = container.clientWidth;
-        const margin = { top: 30, right: 120, bottom: 30, left: 30 }; // Extra right margin for arrows
+        const margin = { top: 30, right: 180, bottom: 30, left: 30 }; // Extra right margin for arrows
         const stageHeight = 80;
         const spacing = 15;
         const totalHeight = stageData.length * (stageHeight + spacing) + margin.top + margin.bottom;
@@ -885,25 +885,39 @@ function createFunnelVisualization() {
             // Get change statistics for this stage
             const changeStats = getStageChangeStats(stageInfo.stage);
 
+            // Base font size and max text width for each section
+            const baseFont = 18;
+            const sectionWidth = (topWidth - 30) / 3; // three equal sections with padding
+
+            const adjustTextSize = (textSel, maxWidth) => {
+                const node = textSel.node();
+                if (!node) return;
+                const length = node.getComputedTextLength();
+                if (length > maxWidth) {
+                    const scale = maxWidth / length;
+                    textSel.attr('font-size', `${baseFont * scale}px`);
+                }
+            };
+
             // Add weighted value on the left
-            stageGroup.append('text')
+            const valueText = stageGroup.append('text')
                 .attr('x', x + 15)
                 .attr('y', textY)
                 .attr('text-anchor', 'start')
                 .attr('fill', 'white')
                 .attr('font-weight', 'bold')
-                .attr('font-size', '16px')
+                .attr('font-size', `${baseFont}px`)
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
-                .text(formatCurrency(stageInfo.weightedValue));
+                .text(`$${formatCurrency(stageInfo.weightedValue)}`);
 
             // Stage name centered
-            stageGroup.append('text')
+            const nameText = stageGroup.append('text')
                 .attr('x', x + topWidth / 2)
                 .attr('y', textY)
                 .attr('text-anchor', 'middle')
                 .attr('fill', 'white')
                 .attr('font-weight', 'bold')
-                .attr('font-size', '18px')
+                .attr('font-size', `${baseFont}px`)
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(stageInfo.stage);
 
@@ -918,15 +932,20 @@ function createFunnelVisualization() {
                 }
             }
 
-            stageGroup.append('text')
+            const countTextEl = stageGroup.append('text')
                 .attr('x', x + topWidth - 15)
                 .attr('y', textY)
                 .attr('text-anchor', 'end')
                 .attr('fill', changeStats.hasChanges ? '#28a745' : 'white')
-                .attr('font-size', '16px')
+                .attr('font-size', `${baseFont}px`)
                 .attr('font-weight', changeStats.hasChanges ? 'bold' : 'normal')
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(countText);
+
+            // Adjust text size if necessary to prevent overlap
+            adjustTextSize(valueText, sectionWidth);
+            adjustTextSize(nameText, sectionWidth);
+            adjustTextSize(countTextEl, sectionWidth);
             
             // Add change indicators if there are recent changes
             if (changeStats.hasChanges) {
@@ -934,7 +953,7 @@ function createFunnelVisualization() {
                 stageGroup.append('circle')
                     .attr('cx', x + topWidth - 25)
                     .attr('cy', y + 20)
-                    .attr('r', 12)
+                    .attr('r', 14)
                     .attr('fill', '#ffc107')
                     .attr('stroke', '#e0a800')
                     .attr('stroke-width', 1);
@@ -967,17 +986,19 @@ function createFunnelVisualization() {
                 const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
 
                 // Offset arrows horizontally by lane to prevent overlap
-                const arrowX = width - margin.right + 20 + (movement.offset || 0);
+                let arrowX = width - margin.right + 40 + (movement.offset || 0);
+                const maxArrowX = width - 40;
+                if (arrowX > maxArrowX) arrowX = maxArrowX;
 
                 // Create arrow path
                 const arrowGroup = svg.append('g')
                     .attr('class', 'movement-arrow');
 
                 // Curved arrow path that exits the stage, dips, then returns with vertical orientation
-                const controlPoint1X = arrowX + 30;
+                const controlPoint1X = Math.min(arrowX + 40, width - 20);
                 const controlPoint1Y = fromY;
                 const controlPoint2X = arrowX;
-                const controlPoint2Y = toY - 30;
+                const controlPoint2Y = toY - 40;
                 const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${controlPoint1Y}, ${controlPoint2X} ${controlPoint2Y}, ${arrowX} ${toY}`;
 
                 arrowGroup.append('path')
@@ -991,7 +1012,7 @@ function createFunnelVisualization() {
 
                 // Movement count label - positioned on the curve
                 const midY = (fromY + toY) / 2;
-                const labelX = arrowX + 15;
+                const labelX = Math.min(arrowX + 20, width - 60);
 
                 arrowGroup.append('circle')
                     .attr('cx', labelX)
@@ -4610,7 +4631,7 @@ function getStageMovements() {
             if (laneOffsets[laneKey] === undefined) {
                 laneOffsets[laneKey] = Object.keys(laneOffsets).length;
             }
-            group.offset = laneOffsets[laneKey] * 25;
+            group.offset = laneOffsets[laneKey] * 40;
         });
 
         return groups;

@@ -879,21 +879,34 @@ function createFunnelVisualization() {
                         .attr('opacity', 1);
                 });
             
-            // Add stage name (white text with shadow for better readability) - Made bigger
+            const textY = y + 45;
+
+            // Get change statistics for this stage
+            const changeStats = getStageChangeStats(stageInfo.stage);
+
+            // Add weighted value on the left
+            stageGroup.append('text')
+                .attr('x', x + 15)
+                .attr('y', textY)
+                .attr('text-anchor', 'start')
+                .attr('fill', 'white')
+                .attr('font-weight', 'bold')
+                .attr('font-size', '16px')
+                .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
+                .text(formatCurrency(stageInfo.weightedValue));
+
+            // Stage name centered
             stageGroup.append('text')
                 .attr('x', x + topWidth / 2)
-                .attr('y', y + 25)
+                .attr('y', textY)
                 .attr('text-anchor', 'middle')
                 .attr('fill', 'white')
                 .attr('font-weight', 'bold')
                 .attr('font-size', '18px')
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(stageInfo.stage);
-            
-            // Get change statistics for this stage
-            const changeStats = getStageChangeStats(stageInfo.stage);
-            
-            // Add lead count with change indicator
+
+            // Lead count on the right with change indicator
             let countText = `${stageInfo.count} leads`;
             if (changeStats.hasChanges) {
                 if (changeStats.newLeads > 0) {
@@ -903,27 +916,16 @@ function createFunnelVisualization() {
                     countText += ` (-${changeStats.removedLeads})`;
                 }
             }
-            
+
             stageGroup.append('text')
-                .attr('x', x + topWidth / 2)
-                .attr('y', y + 45)
-                .attr('text-anchor', 'middle')
+                .attr('x', x + topWidth - 15)
+                .attr('y', textY)
+                .attr('text-anchor', 'end')
                 .attr('fill', changeStats.hasChanges ? '#28a745' : 'white')
                 .attr('font-size', '16px')
                 .attr('font-weight', changeStats.hasChanges ? 'bold' : 'normal')
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(countText);
-            
-            // Add weighted value (white text with shadow) - Made bigger
-            stageGroup.append('text')
-                .attr('x', x + topWidth / 2)
-                .attr('y', y + 65)
-                .attr('text-anchor', 'middle')
-                .attr('fill', 'white')
-                .attr('font-weight', 'bold')
-                .attr('font-size', '16px')
-                .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
-                .text(formatCurrency(stageInfo.weightedValue));
             
             // Add change indicators if there are recent changes
             if (changeStats.hasChanges) {
@@ -953,7 +955,7 @@ function createFunnelVisualization() {
 
         // Add movement arrows between stages - positioned on the right side
         const movements = getStageMovements();
-        movements.forEach((movement, index) => {
+        movements.forEach(movement => {
             // Find the source and target stage positions
             const fromStageIndex = stageData.findIndex(s => s.stage === movement.fromStage);
             const toStageIndex = stageData.findIndex(s => s.stage === movement.toStage);
@@ -966,9 +968,8 @@ function createFunnelVisualization() {
                 const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
                 const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
 
-                // Offset arrows horizontally to prevent overlap
-                const offset = index * 15;
-                const arrowX = width - margin.right + 20 + offset;
+                // Offset arrows horizontally by lane to prevent overlap
+                const arrowX = width - margin.right + 20 + (movement.offset || 0);
                 const controlPoint1X = arrowX + 30;
                 const controlPoint2X = arrowX + 30;
 
@@ -3853,6 +3854,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
         // Sort by change time to track stage transitions
         leadChanges.sort((a, b) => new Date(a.change.changed_at) - new Date(b.change.changed_at));
         let previousStage = null;
+        const leadEvents = [];
 
         leadChanges.forEach(({ change, lead }) => {
             const changeDate = new Date(change.changed_at);
@@ -3876,7 +3878,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
 
             if (change.action_type === 0 && options.includeNewLeads) {
                 const stage = change.value?.text || 'Unknown Stage';
-                changes.push({
+                leadEvents.push({
                     type: 'new_lead',
                     leadId: lead.id,
                     leadName,
@@ -3889,7 +3891,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
                 });
                 previousStage = stage;
             } else if (change.action_type === 1 && options.includeRemovedLeads) {
-                changes.push({
+                leadEvents.push({
                     type: 'removed_lead',
                     leadId: lead.id,
                     leadName,
@@ -3903,7 +3905,7 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
                 previousStage = null;
             } else if (change.action_type === 2 && options.includeStageChanges) {
                 const newStage = change.value?.text || 'Unknown Stage';
-                changes.push({
+                leadEvents.push({
                     type: 'stage_change',
                     leadId: lead.id,
                     leadName,
@@ -3925,6 +3927,12 @@ function processFieldValueChanges(changesByLead, startDate, endDate, options) {
                 }
             }
         });
+
+        // Apply final stage to all recorded events for this lead
+        leadEvents.forEach(evt => {
+            evt.finalStage = previousStage;
+        });
+        changes.push(...leadEvents);
     });
 
     // Sort by timestamp (newest first)
@@ -4567,13 +4575,16 @@ function getStageMovements() {
     if (historicalMode && Array.isArray(lastProcessedChanges)) {
         const stageChanges = lastProcessedChanges.filter(c => c.type === 'stage_change');
         const movementGroups = {};
+        const laneOffsets = {};
 
         stageChanges.forEach(change => {
-            const key = `${change.oldStage}->${change.newStage}`;
+            const laneKey = change.finalStage || 'removed';
+            const key = `${change.oldStage}->${change.newStage}->${laneKey}`;
             if (!movementGroups[key]) {
                 movementGroups[key] = {
                     fromStage: change.oldStage,
                     toStage: change.newStage,
+                    finalStage: change.finalStage,
                     count: 0,
                     totalValue: 0,
                     movements: []
@@ -4588,11 +4599,21 @@ function getStageMovements() {
                 leadName: change.leadName,
                 value: change.value,
                 timestamp: change.timestamp,
-                changeDate: change.changeDate
+                changeDate: change.changeDate,
+                finalStage: change.finalStage
             });
         });
 
-        return Object.values(movementGroups);
+        const groups = Object.values(movementGroups);
+        groups.forEach(group => {
+            const laneKey = group.finalStage || 'removed';
+            if (laneOffsets[laneKey] === undefined) {
+                laneOffsets[laneKey] = Object.keys(laneOffsets).length;
+            }
+            group.offset = laneOffsets[laneKey] * 15;
+        });
+
+        return groups;
     }
 
     if (pipelineHistory.length < 2) {

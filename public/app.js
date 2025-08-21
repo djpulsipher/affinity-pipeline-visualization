@@ -3775,92 +3775,130 @@ function analyzeHistoricalChanges(startDate, endDate, options) {
 
 async function getFieldValueChanges(fieldId, startDate, endDate, options) {
     console.log('getFieldValueChanges called with:', { fieldId, startDate, endDate, options });
-    
+
+    if (!currentData || !currentData.leads) {
+        showNotification('No pipeline data loaded. Please load pipeline data first.', 'error');
+        return;
+    }
+
     try {
-        // Get all field value changes for the stage field
-        const response = await fetch(`/api/field-value-changes?field_id=${fieldId}`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const fieldValueChanges = await response.json();
-        console.log('Field value changes from API:', fieldValueChanges);
-        
-        // Filter changes by date range
-        const filteredChanges = fieldValueChanges.filter(change => {
-            const changeDate = new Date(change.changed_at);
-            return changeDate >= startDate && changeDate <= endDate;
-        });
-        
-        console.log('Filtered changes in date range:', filteredChanges);
-        
-        // Process the changes to match our expected format
-        const processedChanges = processFieldValueChanges(filteredChanges, options);
-        
+        const changesByLead = {};
+
+        // Fetch field value changes for each lead in parallel
+        await Promise.all(currentData.leads.map(async lead => {
+            try {
+                const resp = await fetch(`/api/field-value-changes?field_id=${fieldId}&list_entry_id=${lead.id}`);
+                if (!resp.ok) {
+                    throw new Error(`HTTP error! status: ${resp.status}`);
+                }
+                const leadChanges = await resp.json();
+                if (!Array.isArray(leadChanges)) return;
+                changesByLead[lead.id] = leadChanges.map(change => ({ change, lead }));
+            } catch (err) {
+                console.error('Error fetching changes for lead', lead.id, err);
+            }
+        }));
+
+        const processedChanges = processFieldValueChanges(changesByLead, startDate, endDate, options);
         console.log('Processed changes:', processedChanges);
-        
+
         displayHistoricalResults(processedChanges, startDate, endDate);
-        
     } catch (error) {
         console.error('Error fetching field value changes:', error);
         showNotification('Failed to fetch field value changes: ' + error.message, 'error');
     }
 }
 
-function processFieldValueChanges(fieldValueChanges, options) {
+function processFieldValueChanges(changesByLead, startDate, endDate, options) {
     const changes = [];
-    
-    fieldValueChanges.forEach(change => {
-        const changeDate = new Date(change.changed_at);
-        
-        // Map action types to our change types
-        // 0 = Create, 1 = Delete, 2 = Update
-        if (change.action_type === 0 && options.includeNewLeads) {
-            // Create - new lead added to stage
-            changes.push({
-                type: 'new_lead',
-                leadId: change.entity_id,
-                leadName: `Lead ${change.entity_id}`, // We'll need to get the actual name
-                stage: change.value?.text || 'Unknown Stage',
-                value: 0, // We'll need to get the actual value
-                timestamp: change.changed_at,
-                changeDate: changeDate,
-                actionType: 'create',
-                changer: change.changer
-            });
-        } else if (change.action_type === 1 && options.includeRemovedLeads) {
-            // Delete - lead removed from stage
-            changes.push({
-                type: 'removed_lead',
-                leadId: change.entity_id,
-                leadName: `Lead ${change.entity_id}`, // We'll need to get the actual name
-                stage: change.value?.text || 'Unknown Stage',
-                value: 0, // We'll need to get the actual value
-                timestamp: change.changed_at,
-                changeDate: changeDate,
-                actionType: 'delete',
-                changer: change.changer
-            });
-        } else if (change.action_type === 2 && options.includeStageChanges) {
-            // Update - stage change (we'll need to determine old vs new value)
-            changes.push({
-                type: 'stage_change',
-                leadId: change.entity_id,
-                leadName: `Lead ${change.entity_id}`, // We'll need to get the actual name
-                oldStage: 'Previous Stage', // We'll need to determine this
-                newStage: change.value?.text || 'Unknown Stage',
-                value: 0, // We'll need to get the actual value
-                timestamp: change.changed_at,
-                changeDate: changeDate,
-                actionType: 'update',
-                changer: change.changer
-            });
-        }
+
+    Object.values(changesByLead).forEach(leadChanges => {
+        // Sort by change time to track stage transitions
+        leadChanges.sort((a, b) => new Date(a.change.changed_at) - new Date(b.change.changed_at));
+        let previousStage = null;
+
+        leadChanges.forEach(({ change, lead }) => {
+            const changeDate = new Date(change.changed_at);
+
+            // Update stage context even if we're outside the range
+            if (changeDate < startDate) {
+                if (change.action_type === 0 || change.action_type === 2) {
+                    previousStage = change.value?.text || previousStage;
+                } else if (change.action_type === 1) {
+                    previousStage = null;
+                }
+                return;
+            }
+
+            if (changeDate > endDate) {
+                return;
+            }
+
+            const leadName = getLeadDisplayName(lead);
+            const value = lead.value || 0;
+
+            if (change.action_type === 0 && options.includeNewLeads) {
+                const stage = change.value?.text || 'Unknown Stage';
+                changes.push({
+                    type: 'new_lead',
+                    leadId: lead.entity_id,
+                    leadName,
+                    stage,
+                    value,
+                    timestamp: change.changed_at,
+                    changeDate,
+                    actionType: 'create',
+                    changer: change.changer
+                });
+                previousStage = stage;
+            } else if (change.action_type === 1 && options.includeRemovedLeads) {
+                changes.push({
+                    type: 'removed_lead',
+                    leadId: lead.entity_id,
+                    leadName,
+                    stage: previousStage || 'Unknown Stage',
+                    value,
+                    timestamp: change.changed_at,
+                    changeDate,
+                    actionType: 'delete',
+                    changer: change.changer
+                });
+                previousStage = null;
+            } else if (change.action_type === 2 && options.includeStageChanges) {
+                const newStage = change.value?.text || 'Unknown Stage';
+                changes.push({
+                    type: 'stage_change',
+                    leadId: lead.entity_id,
+                    leadName,
+                    oldStage: previousStage || 'Unknown Stage',
+                    newStage,
+                    value,
+                    timestamp: change.changed_at,
+                    changeDate,
+                    actionType: 'update',
+                    changer: change.changer
+                });
+                previousStage = newStage;
+            } else {
+                // Keep track of stage even if we don't include the change
+                if (change.action_type === 0 || change.action_type === 2) {
+                    previousStage = change.value?.text || previousStage;
+                } else if (change.action_type === 1) {
+                    previousStage = null;
+                }
+            }
+        });
     });
-    
+
     // Sort by timestamp (newest first)
     return changes.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+function getLeadDisplayName(lead) {
+    return lead?.entity?.name ||
+           lead?.entity?.properties?.name ||
+           [lead?.entity?.first_name, lead?.entity?.last_name].filter(Boolean).join(' ') ||
+           `Lead ${lead?.entity_id || lead?.id}`;
 }
 
 async function showAvailableSnapshots() {

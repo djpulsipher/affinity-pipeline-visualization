@@ -1888,25 +1888,170 @@ body {
 .movement-arrow path {
     opacity: 0.8;
     transition: opacity 0.3s ease;
+    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.1));
 }
 
 .movement-arrow:hover path {
     opacity: 1;
-    stroke-width: 4;
+    stroke-width: 5;
+    filter: drop-shadow(3px 3px 6px rgba(0,0,0,0.2));
 }
 
 .movement-arrow circle {
     transition: all 0.3s ease;
+    filter: drop-shadow(1px 1px 3px rgba(0,0,0,0.2));
 }
 
 .movement-arrow:hover circle {
     transform: scale(1.1);
-    fill: #0056b3;
+    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));
+}
+
+.movement-arrow rect {
+    transition: all 0.3s ease;
+    filter: drop-shadow(1px 1px 3px rgba(0,0,0,0.2));
+}
+
+.movement-arrow:hover rect {
+    transform: scale(1.05);
+    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.3));
 }
 
 .movement-arrow text {
     pointer-events: none;
     user-select: none;
+}
+
+/* Lost Stages Management */
+.lost-stages-list {
+    border: 1px solid #e0e6ed;
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 8px;
+    background-color: #f8f9fa;
+}
+
+.lost-stage-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding: 8px;
+    background-color: white;
+    border-radius: 6px;
+    border: 1px solid #e0e6ed;
+}
+
+.lost-stage-item:last-child {
+    margin-bottom: 0;
+}
+
+.lost-stage-item select {
+    flex: 1;
+    margin: 0;
+}
+
+.remove-lost-stage {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    background-color: #dc3545;
+    color: white;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.remove-lost-stage:hover {
+    background-color: #c82333;
+}
+
+#addLostStage {
+    margin-top: 8px;
+    width: 100%;
+    padding: 8px;
+    border: 2px dashed #6c757d;
+    background-color: transparent;
+    color: #6c757d;
+    transition: all 0.2s ease;
+}
+
+#addLostStage:hover {
+    border-color: #007bff;
+    color: #007bff;
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+/* Arrow tooltip and lead movement details */
+.arrow-tooltip {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.4;
+}
+
+.lead-movement-item {
+    border: 1px solid #e0e6ed;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background-color: #f8f9fa;
+}
+
+.lead-movement-item:last-child {
+    margin-bottom: 0;
+}
+
+.lead-movement-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.lead-movement-value {
+    color: #28a745;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.lead-movement-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.lead-movement-date {
+    font-style: italic;
+}
+
+.lead-movement-direction {
+    color: #007bff;
+    font-weight: 500;
+}
+
+.movement-summary {
+    background-color: #e3f2fd;
+    border: 1px solid #bbdefb;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.movement-summary p {
+    margin: 4px 0;
+    font-size: 14px;
+}
+
+.lead-movements-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.lead-movements-list h4 {
+    margin-bottom: 12px;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 6px;
 }
 
 /* Responsive adjustments for arrows */
@@ -1921,6 +2066,27 @@ body {
     
     .movement-arrow text {
         font-size: 8px;
+    }
+    
+    .lost-stage-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .remove-lost-stage {
+        align-self: flex-end;
+        width: auto;
+    }
+    
+    .lead-movement-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .arrow-tooltip {
+        max-width: 250px;
+        font-size: 11px;
     }
 }
 

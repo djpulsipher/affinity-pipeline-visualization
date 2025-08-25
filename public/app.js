@@ -128,6 +128,9 @@ function initializeApp() {
     const lostStagesSelect = document.getElementById('lostStages');
     if (lostStagesSelect) lostStagesSelect.addEventListener('change', updateDefaultSettings);
     
+    const addLostStageBtn = document.getElementById('addLostStage');
+    if (addLostStageBtn) addLostStageBtn.addEventListener('click', addAdditionalLostStage);
+    
     const ruleField = document.getElementById('ruleField');
     if (ruleField) ruleField.addEventListener('change', onRuleFieldChange);
     
@@ -952,30 +955,7 @@ function createFunnelVisualization() {
             adjustTextSize(nameText, sectionWidth);
             adjustTextSize(countTextEl, sectionWidth);
             
-            // Add change indicators if there are recent changes
-            if (changeStats.hasChanges) {
-                // Add a small indicator dot
-                stageGroup.append('circle')
-                    .attr('cx', x + topWidth - 25)
-                    .attr('cy', y + 20)
-                    .attr('r', 14)
-                    .attr('fill', '#ffc107')
-                    .attr('stroke', '#e0a800')
-                    .attr('stroke-width', 1);
-
-                // Add change count inside the dot (new and removed leads only)
-                const totalChanges = changeStats.newLeads + changeStats.removedLeads;
-                if (totalChanges > 0) {
-                    stageGroup.append('text')
-                        .attr('x', x + topWidth - 25)
-                        .attr('y', y + 26)
-                        .attr('text-anchor', 'middle')
-                        .attr('fill', 'white')
-                        .attr('font-size', '12px')
-                        .attr('font-weight', 'bold')
-                        .text(totalChanges > 9 ? '9+' : totalChanges);
-                }
-            }
+            // Note: Yellow dot indicators removed as they were redundant with the green lead count text
         });
 
         // Add movement arrows between stages - positioned on the right side
@@ -995,7 +975,17 @@ function createFunnelVisualization() {
                 if (arrowX > maxArrowX) arrowX = maxArrowX;
 
                 const arrowGroup = svg.append('g')
-                    .attr('class', 'movement-arrow');
+                    .attr('class', 'movement-arrow')
+                    .style('cursor', 'pointer')
+                    .on('mouseover', function() {
+                        showArrowTooltip(movement, this);
+                    })
+                    .on('mouseout', function() {
+                        hideArrowTooltip();
+                    })
+                    .on('click', function() {
+                        showArrowLeadDetails(movement);
+                    });
 
                 const controlPoint1X = Math.min(arrowX + 40, width - 20);
                 const controlPoint1Y = fromY;
@@ -1036,47 +1026,82 @@ function createFunnelVisualization() {
                 let arrowX = width - margin.right + 40 + (movement.offset || 0);
                 const maxArrowX = width - 40;
                 if (arrowX > maxArrowX) arrowX = maxArrowX;
-                const endX = Math.min(arrowX + 60, width - 20);
 
                 const color = isClosedWon ? '#28a745' : '#dc3545';
                 const markerId = isClosedWon ? 'arrowhead-won' : 'arrowhead-lost';
+                const label = isClosedWon ? 'WON' : 'LOST';
 
                 const arrowGroup = svg.append('g')
-                    .attr('class', 'movement-arrow');
+                    .attr('class', 'movement-arrow')
+                    .style('cursor', 'pointer')
+                    .on('mouseover', function() {
+                        showArrowTooltip(movement, this);
+                    })
+                    .on('mouseout', function() {
+                        hideArrowTooltip();
+                    })
+                    .on('click', function() {
+                        showArrowLeadDetails(movement);
+                    });
 
-                const pathData = `M ${arrowX} ${fromY} L ${endX} ${fromY}`;
+                // Create a more elegant curved path that flows outward
+                const controlPointX = Math.min(arrowX + 80, width - 20);
+                let controlPointY = fromY - 40; // Curve upward for lost, downward for won
+                if (isClosedWon) {
+                    controlPointY = fromY + 40;
+                }
+                const endX = Math.min(arrowX + 100, width - 20);
+                const endY = fromY + (isClosedWon ? 20 : -20);
+
+                const pathData = `M ${arrowX} ${fromY} Q ${controlPointX} ${controlPointY} ${endX} ${endY}`;
 
                 arrowGroup.append('path')
                     .attr('d', pathData)
                     .attr('stroke', color)
-                    .attr('stroke-width', 3)
+                    .attr('stroke-width', 4)
                     .attr('fill', 'none')
-                    .attr('stroke-dasharray', '5,5')
+                    .attr('stroke-dasharray', isLost ? '8,4' : '6,3')
                     .attr('stroke-linecap', 'round')
-                    .attr('marker-end', `url(#${markerId})`);
+                    .attr('marker-end', `url(#${markerId})`)
+                    .attr('opacity', 0.9);
 
-                const midX = (arrowX + endX) / 2;
+                // Position circle at the curve's peak
+                const midX = (arrowX + controlPointX) / 2;
+                const midY = (fromY + controlPointY) / 2;
+                
                 arrowGroup.append('circle')
                     .attr('cx', midX)
-                    .attr('cy', fromY)
-                    .attr('r', 12)
+                    .attr('cy', midY)
+                    .attr('r', 14)
                     .attr('fill', color)
                     .attr('stroke', 'white')
-                    .attr('stroke-width', 2);
+                    .attr('stroke-width', 2)
+                    .attr('opacity', 0.95);
 
                 arrowGroup.append('text')
                     .attr('x', midX)
-                    .attr('y', fromY + 4)
+                    .attr('y', midY + 4)
                     .attr('text-anchor', 'middle')
                     .attr('fill', 'white')
                     .attr('font-size', '10px')
                     .attr('font-weight', 'bold')
                     .text(movement.count > 9 ? '9+' : movement.count);
 
-                arrowGroup.append('text')
-                    .attr('x', endX + 8)
-                    .attr('y', fromY + 4)
+                // Add stylized label at the end
+                arrowGroup.append('rect')
+                    .attr('x', endX + 5)
+                    .attr('y', endY - 8)
+                    .attr('width', 32)
+                    .attr('height', 16)
+                    .attr('rx', 8)
                     .attr('fill', color)
+                    .attr('opacity', 0.9);
+
+                arrowGroup.append('text')
+                    .attr('x', endX + 21)
+                    .attr('y', endY + 4)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', 'white')
                     .attr('font-size', '14px')
                     .attr('font-weight', 'bold')
                     .text(isClosedWon ? '✓' : '✕');
@@ -1758,9 +1783,26 @@ function loadDefaultSettings() {
 
     const lostStagesInput = document.getElementById('lostStages');
     if (lostStagesInput && Array.isArray(defaultSettings.lostStages)) {
-        Array.from(lostStagesInput.options).forEach(option => {
-            option.selected = defaultSettings.lostStages.includes(option.value);
-        });
+        // Set primary lost stage (first one in the array)
+        lostStagesInput.value = defaultSettings.lostStages.length > 0 ? defaultSettings.lostStages[0] : '';
+        
+        // Clear and repopulate additional lost stages
+        const container = document.getElementById('additionalLostStagesList');
+        if (container) {
+            container.innerHTML = '';
+            // Add additional lost stages (skip the first one)
+            for (let i = 1; i < defaultSettings.lostStages.length; i++) {
+                if (currentData) {
+                    const stageValues = new Set();
+                    currentData.leads.forEach(lead => {
+                        if (lead.stage) {
+                            stageValues.add(lead.stage);
+                        }
+                    });
+                    addLostStageItem(defaultSettings.lostStages[i], Array.from(stageValues).sort());
+                }
+            }
+        }
     }
 
     // Ensure excluded stages include closed/won and lost selections
@@ -1955,15 +1997,100 @@ function populateLostStageValues() {
         }
     });
 
-    Array.from(stageValues).sort().forEach(stage => {
+    const sortedStages = Array.from(stageValues).sort();
+    
+    sortedStages.forEach(stage => {
         const option = document.createElement('option');
         option.value = stage;
         option.textContent = stage;
-        if (defaultSettings.lostStages.includes(stage)) {
+        // Set the primary lost stage
+        if (Array.isArray(defaultSettings.lostStages) && defaultSettings.lostStages.length > 0 && defaultSettings.lostStages[0] === stage) {
             option.selected = true;
         }
         valueSelect.appendChild(option);
     });
+    
+    // Populate additional lost stages
+    populateAdditionalLostStages();
+}
+
+// Populate additional lost stages UI
+function populateAdditionalLostStages() {
+    const container = document.getElementById('additionalLostStagesList');
+    if (!container || !currentData) return;
+    
+    // Clear existing additional stages
+    container.innerHTML = '';
+    
+    // Get all available stages
+    const stageValues = new Set();
+    currentData.leads.forEach(lead => {
+        if (lead.stage) {
+            stageValues.add(lead.stage);
+        }
+    });
+    const sortedStages = Array.from(stageValues).sort();
+    
+    // Create additional lost stage items (skip the first one since that's the primary)
+    if (Array.isArray(defaultSettings.lostStages) && defaultSettings.lostStages.length > 1) {
+        for (let i = 1; i < defaultSettings.lostStages.length; i++) {
+            addLostStageItem(defaultSettings.lostStages[i], sortedStages);
+        }
+    }
+}
+
+// Add a new lost stage item
+function addLostStageItem(selectedValue = '', availableStages = []) {
+    const container = document.getElementById('additionalLostStagesList');
+    if (!container) return;
+    
+    // Get available stages if not provided
+    if (availableStages.length === 0 && currentData) {
+        const stageValues = new Set();
+        currentData.leads.forEach(lead => {
+            if (lead.stage) {
+                stageValues.add(lead.stage);
+            }
+        });
+        availableStages = Array.from(stageValues).sort();
+    }
+    
+    const item = document.createElement('div');
+    item.className = 'lost-stage-item';
+    
+    const select = document.createElement('select');
+    select.className = 'form-control additional-lost-stage';
+    select.innerHTML = '<option value="">Select additional stage...</option>';
+    
+    availableStages.forEach(stage => {
+        const option = document.createElement('option');
+        option.value = stage;
+        option.textContent = stage;
+        if (stage === selectedValue) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+    
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-sm btn-danger remove-lost-stage';
+    removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+    removeBtn.addEventListener('click', () => {
+        item.remove();
+        updateDefaultSettings();
+    });
+    
+    select.addEventListener('change', updateDefaultSettings);
+    
+    item.appendChild(select);
+    item.appendChild(removeBtn);
+    container.appendChild(item);
+}
+
+// Add additional lost stage handler
+function addAdditionalLostStage() {
+    addLostStageItem();
 }
 
 // Handle rule field change to populate value dropdown
@@ -2253,8 +2380,24 @@ function updateDefaultSettings() {
     defaultSettings.globalDefaultValue = parseFloat(document.getElementById('globalDefaultValue').value) || 1000000;
     defaultSettings.closedWonStage = document.getElementById('closedWonStage').value;
     defaultSettings.closedWonValueField = document.getElementById('closedWonValueField').value;
+    // Collect lost stages from primary select and additional stages
+    const lostStages = [];
+    
+    // Get primary lost stage
     const lostSelect = document.getElementById('lostStages');
-    defaultSettings.lostStages = lostSelect ? Array.from(lostSelect.selectedOptions).map(o => o.value).filter(v => v) : [];
+    if (lostSelect && lostSelect.value) {
+        lostStages.push(lostSelect.value);
+    }
+    
+    // Get additional lost stages
+    const additionalStages = document.querySelectorAll('.additional-lost-stage');
+    additionalStages.forEach(select => {
+        if (select.value && !lostStages.includes(select.value)) {
+            lostStages.push(select.value);
+        }
+    });
+    
+    defaultSettings.lostStages = lostStages;
 
     // Update excluded stages
     excludedStages.delete(oldClosedWon);
@@ -4807,4 +4950,134 @@ function getStageMovements() {
     return Object.values(movementGroups);
 }
 
+// Arrow tooltip and lead details functionality
+let currentArrowTooltip = null;
+
+function showArrowTooltip(movement, element) {
+    // Remove existing tooltip
+    hideArrowTooltip();
+    
+    // Create tooltip content
+    const leadNames = movement.movements.map(m => m.leadName || `Lead ${m.leadId}`).slice(0, 5);
+    const remainingCount = movement.movements.length - 5;
+    
+    let tooltipContent = `<strong>${movement.count} leads moved</strong><br>`;
+    tooltipContent += `<strong>From:</strong> ${movement.fromStage}<br>`;
+    tooltipContent += `<strong>To:</strong> ${movement.toStage}<br>`;
+    tooltipContent += `<strong>Total Value:</strong> $${formatCurrency(movement.totalValue)}<br><br>`;
+    
+    if (leadNames.length > 0) {
+        tooltipContent += `<strong>Leads:</strong><br>`;
+        leadNames.forEach(name => {
+            tooltipContent += `• ${name}<br>`;
+        });
+        if (remainingCount > 0) {
+            tooltipContent += `• ... and ${remainingCount} more<br>`;
+        }
+    }
+    
+    tooltipContent += `<br><em>Click for full details</em>`;
+    
+    // Create tooltip element
+    const tooltip = document.createElement('div');
+    tooltip.className = 'arrow-tooltip';
+    tooltip.innerHTML = tooltipContent;
+    tooltip.style.cssText = `
+        position: absolute;
+        background: rgba(0, 0, 0, 0.95);
+        color: white;
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        max-width: 300px;
+        z-index: 10000;
+        pointer-events: none;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        border: 1px solid rgba(255,255,255,0.2);
+    `;
+    
+    document.body.appendChild(tooltip);
+    currentArrowTooltip = tooltip;
+    
+    // Position tooltip near the arrow
+    const rect = element.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    
+    let left = rect.left + rect.width + 10;
+    let top = rect.top + rect.height / 2 - tooltipRect.height / 2;
+    
+    // Adjust if tooltip goes off screen
+    if (left + tooltipRect.width > window.innerWidth) {
+        left = rect.left - tooltipRect.width - 10;
+    }
+    if (top + tooltipRect.height > window.innerHeight) {
+        top = window.innerHeight - tooltipRect.height - 10;
+    }
+    if (top < 10) {
+        top = 10;
+    }
+    
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+}
+
+function hideArrowTooltip() {
+    if (currentArrowTooltip) {
+        currentArrowTooltip.remove();
+        currentArrowTooltip = null;
+    }
+}
+
+function showArrowLeadDetails(movement) {
+    const modal = document.getElementById('leadModal');
+    const content = document.getElementById('modalContent');
+    
+    if (!modal || !content) return;
+    
+    const isClosedWon = defaultSettings.closedWonStage === movement.toStage;
+    const isLost = defaultSettings.lostStages.includes(movement.toStage);
+    
+    let title = `Lead Movement: ${movement.fromStage} → ${movement.toStage}`;
+    if (isClosedWon) {
+        title = `Leads Won: ${movement.fromStage} → ${movement.toStage}`;
+    } else if (isLost) {
+        title = `Leads Lost: ${movement.fromStage} → ${movement.toStage}`;
+    }
+    
+    let leadDetails = '';
+    movement.movements.forEach((move, index) => {
+        const leadName = move.leadName || `Lead ${move.leadId}`;
+        const value = move.value ? `$${formatCurrency(move.value)}` : 'No value';
+        const date = move.changeDate ? formatChangeDate(move.changeDate) : 
+                    move.timestamp ? new Date(move.timestamp).toLocaleDateString() : 'Unknown date';
+        
+        leadDetails += `
+            <div class="lead-movement-item">
+                <div class="lead-movement-header">
+                    <strong>${leadName}</strong>
+                    <span class="lead-movement-value">${value}</span>
+                </div>
+                <div class="lead-movement-details">
+                    <span class="lead-movement-date">Moved on ${date}</span>
+                    <span class="lead-movement-direction">${move.fromStage} → ${move.toStage}</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    content.innerHTML = `
+        <h3>${title}</h3>
+        <div class="movement-summary">
+            <p><strong>Total Leads:</strong> ${movement.count}</p>
+            <p><strong>Total Value:</strong> $${formatCurrency(movement.totalValue)}</p>
+            <p><strong>Average Value:</strong> $${formatCurrency(movement.totalValue / movement.count)}</p>
+        </div>
+        <div class="lead-movements-list">
+            <h4>Lead Details:</h4>
+            ${leadDetails}
+        </div>
+    `;
+    
+    modal.classList.remove('hidden');
+}
  

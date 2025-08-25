@@ -134,10 +134,26 @@
                 <div class="closed-won-section">
                     <h4>Lost Stage Configuration</h4>
                     <div class="form-group">
-                        <label for="lostStages">Lost Stage Values:</label>
-                        <select id="lostStages" class="form-control" multiple>
+                        <label for="lostStages">Primary Lost Stage Value:</label>
+                        <select id="lostStages" class="form-control">
                             <option value="">Select stage value...</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="additionalLostStages">Additional Lost Stage Values (Optional):</label>
+                        <div class="lost-stages-list" id="additionalLostStagesList">
+                            <div class="lost-stage-item-template" style="display: none;">
+                                <select class="form-control additional-lost-stage">
+                                    <option value="">Select additional stage...</option>
+                                </select>
+                                <button type="button" class="btn btn-sm btn-danger remove-lost-stage">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" id="addLostStage" class="btn btn-outline btn-sm">
+                            <i class="fas fa-plus"></i> Add Another Lost Stage
+                        </button>
                     </div>
                 </div>
             </div>

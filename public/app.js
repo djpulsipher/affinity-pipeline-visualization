@@ -786,7 +786,7 @@ function createFunnelVisualization() {
         
         // Create SVG for funnel - Made responsive with container width
         const width = container.clientWidth;
-        const margin = { top: 30, right: 180, bottom: 30, left: 30 }; // Extra right margin for arrows
+        const margin = { top: 30, right: 30, bottom: 30, left: 30 };
         const stageHeight = 80;
         const spacing = 15;
         const totalHeight = stageData.length * (stageHeight + spacing) + margin.top + margin.bottom;
@@ -895,7 +895,7 @@ function createFunnelVisualization() {
 
             // Base font size and max text width for each section
             const baseFont = 18;
-            const sectionWidth = (topWidth - 30) / 3; // three equal sections with padding
+            const sectionWidth = (topWidth - 60) / 3; // increased padding
 
             const adjustTextSize = (textSel, maxWidth) => {
                 const node = textSel.node();
@@ -907,9 +907,45 @@ function createFunnelVisualization() {
                 }
             };
 
+            const wrapSvgText = (textSel, maxWidth) => {
+                const words = textSel.text().split(/\s+/).reverse();
+                let line = [];
+                let lineNumber = 0;
+                const lineHeight = 1.1; // ems
+                const y = textSel.attr('y');
+                const x = textSel.attr('x');
+                let tspan = textSel.text(null)
+                    .append('tspan')
+                    .attr('x', x)
+                    .attr('y', y)
+                    .attr('dy', '0em');
+
+                while (words.length) {
+                    const word = words.pop();
+                    line.push(word);
+                    tspan.text(line.join(' '));
+                    if (tspan.node().getComputedTextLength() > maxWidth && line.length > 1) {
+                        line.pop();
+                        tspan.text(line.join(' '));
+                        line = [word];
+                        tspan = textSel.append('tspan')
+                            .attr('x', x)
+                            .attr('y', y)
+                            .attr('dy', ++lineNumber * lineHeight + 'em')
+                            .text(word);
+                    }
+                }
+
+                const lineCount = lineNumber + 1;
+                if (lineCount > 1) {
+                    const offset = ((lineCount - 1) * baseFont * lineHeight) / 2;
+                    textSel.selectAll('tspan').attr('y', y - offset);
+                }
+            };
+
             // Add weighted value on the left
             const valueText = stageGroup.append('text')
-                .attr('x', x + 15)
+                .attr('x', x + 30)
                 .attr('y', textY)
                 .attr('text-anchor', 'start')
                 .attr('fill', 'white')
@@ -929,6 +965,8 @@ function createFunnelVisualization() {
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(stageInfo.stage);
 
+            wrapSvgText(nameText, sectionWidth);
+
             // Lead count on the right with change indicator
             let countText = `${stageInfo.count} leads`;
             if (changeStats.hasChanges) {
@@ -940,175 +978,33 @@ function createFunnelVisualization() {
                 }
             }
 
+            const countColor = changeStats.newLeads > 0
+                ? (defaultSettings.lostStages.includes(stageInfo.stage) ? '#dc3545' : '#28a745')
+                : 'white';
+
             const countTextEl = stageGroup.append('text')
-                .attr('x', x + topWidth - 15)
+                .attr('x', x + topWidth - 30)
                 .attr('y', textY)
                 .attr('text-anchor', 'end')
-                .attr('fill', changeStats.hasChanges ? '#28a745' : 'white')
+                .attr('fill', countColor)
                 .attr('font-size', `${baseFont}px`)
-                .attr('font-weight', changeStats.hasChanges ? 'bold' : 'normal')
+                .attr('font-weight', (changeStats.newLeads > 0 || changeStats.removedLeads > 0) ? 'bold' : 'normal')
                 .attr('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.7))')
                 .text(countText);
 
             // Adjust text size if necessary to prevent overlap
             adjustTextSize(valueText, sectionWidth);
-            adjustTextSize(nameText, sectionWidth);
             adjustTextSize(countTextEl, sectionWidth);
             
             // Note: Yellow dot indicators removed as they were redundant with the green lead count text
         });
 
-        // Add movement arrows between stages - positioned on the right side
+        /* Arrow visualizations are temporarily disabled
         const movements = getStageMovements();
         movements.forEach(movement => {
-            const fromStageIndex = stageData.findIndex(s => s.stage === movement.fromStage);
-            const toStageIndex = stageData.findIndex(s => s.stage === movement.toStage);
-            const isClosedWon = defaultSettings.closedWonStage === movement.toStage;
-            const isLost = defaultSettings.lostStages.includes(movement.toStage);
-
-            if (fromStageIndex !== -1 && toStageIndex !== -1 && fromStageIndex !== toStageIndex) {
-                const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
-                const toY = margin.top + toStageIndex * (stageHeight + spacing) + stageHeight / 2;
-
-                let arrowX = width - margin.right + 40 + (movement.offset || 0);
-                const maxArrowX = width - 40;
-                if (arrowX > maxArrowX) arrowX = maxArrowX;
-
-                const arrowGroup = svg.append('g')
-                    .attr('class', 'movement-arrow')
-                    .style('cursor', 'pointer')
-                    .on('mouseover', function() {
-                        showArrowTooltip(movement, this);
-                    })
-                    .on('mouseout', function() {
-                        hideArrowTooltip();
-                    })
-                    .on('click', function() {
-                        showArrowLeadDetails(movement);
-                    });
-
-                const controlPoint1X = Math.min(arrowX + 40, width - 20);
-                const controlPoint1Y = fromY;
-                const controlPoint2X = arrowX;
-                const controlPoint2Y = toY - 40;
-                const pathData = `M ${arrowX} ${fromY} C ${controlPoint1X} ${controlPoint1Y}, ${controlPoint2X} ${controlPoint2Y}, ${arrowX} ${toY}`;
-
-                arrowGroup.append('path')
-                    .attr('d', pathData)
-                    .attr('stroke', '#007bff')
-                    .attr('stroke-width', 3)
-                    .attr('fill', 'none')
-                    .attr('stroke-dasharray', '5,5')
-                    .attr('stroke-linecap', 'round')
-                    .attr('marker-end', 'url(#arrowhead)');
-
-                const midY = (fromY + toY) / 2;
-                const labelX = Math.min(arrowX + 20, width - 60);
-
-                arrowGroup.append('circle')
-                    .attr('cx', labelX)
-                    .attr('cy', midY)
-                    .attr('r', 12)
-                    .attr('fill', '#007bff')
-                    .attr('stroke', 'white')
-                    .attr('stroke-width', 2);
-
-                arrowGroup.append('text')
-                    .attr('x', labelX)
-                    .attr('y', midY + 4)
-                    .attr('text-anchor', 'middle')
-                    .attr('fill', 'white')
-                    .attr('font-size', '10px')
-                    .attr('font-weight', 'bold')
-                    .text(movement.count > 9 ? '9+' : movement.count);
-            } else if (fromStageIndex !== -1 && (isClosedWon || isLost)) {
-                const fromY = margin.top + fromStageIndex * (stageHeight + spacing) + stageHeight / 2;
-                let arrowX = width - margin.right + 40 + (movement.offset || 0);
-                const maxArrowX = width - 40;
-                if (arrowX > maxArrowX) arrowX = maxArrowX;
-
-                const color = isClosedWon ? '#28a745' : '#dc3545';
-                const markerId = isClosedWon ? 'arrowhead-won' : 'arrowhead-lost';
-                const label = isClosedWon ? 'WON' : 'LOST';
-
-                const arrowGroup = svg.append('g')
-                    .attr('class', 'movement-arrow')
-                    .style('cursor', 'pointer')
-                    .on('mouseover', function() {
-                        showArrowTooltip(movement, this);
-                    })
-                    .on('mouseout', function() {
-                        hideArrowTooltip();
-                    })
-                    .on('click', function() {
-                        showArrowLeadDetails(movement);
-                    });
-
-                // Create a more elegant curved path that flows outward
-                const controlPointX = Math.min(arrowX + 80, width - 20);
-                let controlPointY = fromY - 40; // Curve upward for lost, downward for won
-                if (isClosedWon) {
-                    controlPointY = fromY + 40;
-                }
-                const endX = Math.min(arrowX + 100, width - 20);
-                const endY = fromY + (isClosedWon ? 20 : -20);
-
-                const pathData = `M ${arrowX} ${fromY} Q ${controlPointX} ${controlPointY} ${endX} ${endY}`;
-
-                arrowGroup.append('path')
-                    .attr('d', pathData)
-                    .attr('stroke', color)
-                    .attr('stroke-width', 4)
-                    .attr('fill', 'none')
-                    .attr('stroke-dasharray', isLost ? '8,4' : '6,3')
-                    .attr('stroke-linecap', 'round')
-                    .attr('marker-end', `url(#${markerId})`)
-                    .attr('opacity', 0.9);
-
-                // Position circle at the curve's peak
-                const midX = (arrowX + controlPointX) / 2;
-                const midY = (fromY + controlPointY) / 2;
-                
-                arrowGroup.append('circle')
-                    .attr('cx', midX)
-                    .attr('cy', midY)
-                    .attr('r', 14)
-                    .attr('fill', color)
-                    .attr('stroke', 'white')
-                    .attr('stroke-width', 2)
-                    .attr('opacity', 0.95);
-
-                arrowGroup.append('text')
-                    .attr('x', midX)
-                    .attr('y', midY + 4)
-                    .attr('text-anchor', 'middle')
-                    .attr('fill', 'white')
-                    .attr('font-size', '10px')
-                    .attr('font-weight', 'bold')
-                    .text(movement.count > 9 ? '9+' : movement.count);
-
-                // Add stylized label at the end
-                arrowGroup.append('rect')
-                    .attr('x', endX + 5)
-                    .attr('y', endY - 8)
-                    .attr('width', 32)
-                    .attr('height', 16)
-                    .attr('rx', 8)
-                    .attr('fill', color)
-                    .attr('opacity', 0.9);
-
-                arrowGroup.append('text')
-                    .attr('x', endX + 21)
-                    .attr('y', endY + 4)
-                    .attr('text-anchor', 'middle')
-                    .attr('fill', 'white')
-                    .attr('font-size', '14px')
-                    .attr('font-weight', 'bold')
-                    .text(isClosedWon ? '✓' : '✕');
-            }
+            // existing arrow rendering logic removed
         });
 
-        // Add arrow marker definitions
         const markerDefs = defs;
         markerDefs.append('marker')
             .attr('id', 'arrowhead')
@@ -1145,6 +1041,7 @@ function createFunnelVisualization() {
             .append('path')
             .attr('d', 'M0,-5L10,0L0,5')
             .attr('fill', '#dc3545');
+        */
     }
 }
 

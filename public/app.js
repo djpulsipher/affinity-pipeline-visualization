@@ -75,6 +75,15 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeApp() {
+    // Warn if we're on a Vercel preview URL (localStorage tied to subdomain)
+    try {
+        const host = window.location.hostname || '';
+        const isVercelPreview = /-git-|^.*-[a-z0-9]{8}-[a-z0-9]{12}\.vercel\.app$/.test(host);
+        if (isVercelPreview) {
+            showNotification('Preview deployment detected: local data is tied to this URL. Use the production domain for persistence across deploys.', 'warning');
+        }
+    } catch (e) { /* no-op */ }
+
     // Load individual lead weights
     loadIndividualLeadWeights();
 
@@ -105,7 +114,13 @@ function initializeApp() {
     if (closeModalBtn) closeModalBtn.addEventListener('click', closeModal);
     
     const listSelect = document.getElementById('listSelect');
-    if (listSelect) listSelect.addEventListener('change', onListChange);
+    if (listSelect) {
+        listSelect.addEventListener('change', (e) => {
+            // Persist selected list
+            try { localStorage.setItem('ui:lastListId', e.target.value || ''); } catch (_) {}
+            onListChange();
+        });
+    }
     
     const addRuleBtn = document.getElementById('addRule');
     if (addRuleBtn) addRuleBtn.addEventListener('click', showRuleModal);
@@ -167,6 +182,39 @@ function initializeApp() {
 
     // Load lists on startup
     loadLists();
+
+    // Restore persisted UI control selections after DOM is ready
+    restoreUISelections();
+
+    // Restore toggle states
+    try {
+        const savedTracking = localStorage.getItem('ui:changeTrackingEnabled');
+        if (savedTracking !== null) {
+            changeTrackingEnabled = JSON.parse(savedTracking);
+            const toggleBtn = document.getElementById('toggleChangeTracking');
+            if (toggleBtn) {
+                toggleBtn.textContent = changeTrackingEnabled ? 'Disable Tracking' : 'Enable Tracking';
+                toggleBtn.className = changeTrackingEnabled ? 'btn btn-warning' : 'btn btn-success';
+            }
+        }
+        const savedAuto = localStorage.getItem('ui:autoRefreshEnabled');
+        if (savedAuto !== null) {
+            autoRefreshEnabled = JSON.parse(savedAuto);
+            const toggleAuto = document.getElementById('toggleAutoRefresh');
+            if (toggleAuto) {
+                if (autoRefreshEnabled) {
+                    toggleAuto.textContent = 'Stop Auto Refresh';
+                    toggleAuto.className = 'btn btn-warning';
+                    toggleAuto.innerHTML = '<i class="fas fa-stop"></i> Stop Auto Refresh';
+                    startAutoRefresh();
+                } else {
+                    toggleAuto.textContent = 'Auto Refresh';
+                    toggleAuto.className = 'btn btn-outline';
+                    toggleAuto.innerHTML = '<i class="fas fa-clock"></i> Auto Refresh';
+                }
+            }
+        }
+    } catch (_) { /* ignore */ }
 }
 
 // Load lists from Affinity API
@@ -191,6 +239,16 @@ async function loadLists() {
                     option.textContent = `${list.name} (${count} entries)`;
                     listSelect.appendChild(option);
                 });
+
+                // Restore last selected list if available
+                try {
+                    const savedListId = localStorage.getItem('ui:lastListId');
+                    if (savedListId) {
+                        listSelect.value = savedListId;
+                        // Trigger loading of fields for the restored list
+                        onListChange();
+                    }
+                } catch (_) {}
             } else {
                 console.error('Lists is not an array:', lists);
                 showNotification('Invalid list data received', 'error');
@@ -262,6 +320,19 @@ function populateFieldDropdown(selectId, fields, defaultType) {
             }
             
             select.appendChild(option);
+        });
+
+        // Restore saved selection for this field selector if present
+        try {
+            const saved = localStorage.getItem(`ui:${selectId}`);
+            if (saved) {
+                select.value = saved;
+            }
+        } catch (_) {}
+
+        // Persist on change
+        select.addEventListener('change', (e) => {
+            try { localStorage.setItem(`ui:${selectId}`, e.target.value || ''); } catch (_) {}
         });
         
         // Also populate default stage field dropdown if it exists and we're populating stage fields
@@ -1846,6 +1917,25 @@ async function populateDefaultStageValues() {
         console.error('Error populating default stage values:', error);
         if (valueSelect) valueSelect.innerHTML = '<option value="">Error loading values</option>';
     }
+}
+
+// Restore persisted UI selections for primary selectors
+function restoreUISelections() {
+    try {
+        const stageFieldSel = document.getElementById('stageField');
+        const valueFieldSel = document.getElementById('valueField');
+        const sourceFieldSel = document.getElementById('sourceField');
+        const firstEmailSel = document.getElementById('firstEmailField');
+
+        const savedStage = localStorage.getItem('ui:stageField');
+        if (stageFieldSel && savedStage) stageFieldSel.value = savedStage;
+        const savedValue = localStorage.getItem('ui:valueField');
+        if (valueFieldSel && savedValue) valueFieldSel.value = savedValue;
+        const savedSource = localStorage.getItem('ui:sourceField');
+        if (sourceFieldSel && savedSource) sourceFieldSel.value = savedSource;
+        const savedFirstEmail = localStorage.getItem('ui:firstEmailField');
+        if (firstEmailSel && savedFirstEmail) firstEmailSel.value = savedFirstEmail;
+    } catch (_) { /* ignore */ }
 }
 
 // Populate closed/won stage values
@@ -3734,6 +3824,9 @@ function toggleChangeTracking() {
     } else {
         showNotification('Pipeline change tracking disabled', 'warning');
     }
+
+    // Persist preference
+    try { localStorage.setItem('ui:changeTrackingEnabled', JSON.stringify(changeTrackingEnabled)); } catch (_) {}
 }
 
 function clearChangeHistory() {
@@ -3792,13 +3885,32 @@ function showHistoricalSearchModal() {
         }
     }
     
-    // Set default date range to last 30 days
+    // Set default date range to last 30 days, then override with saved values if present
     const today = new Date();
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setDate(today.getDate() - 30);
-    
     startDate.value = thirtyDaysAgo.toISOString().split('T')[0];
     endDate.value = today.toISOString().split('T')[0];
+
+    // Restore saved historical search settings
+    try {
+        const saved = JSON.parse(localStorage.getItem('ui:historicalSearch') || '{}');
+        if (saved.startDate) startDate.value = saved.startDate;
+        if (saved.endDate) endDate.value = saved.endDate;
+        if (typeof saved.includeNewLeads === 'boolean') {
+            const c = document.getElementById('includeNewLeads');
+            if (c) c.checked = saved.includeNewLeads;
+        }
+        if (typeof saved.includeStageChanges === 'boolean') {
+            const c = document.getElementById('includeStageChanges');
+            if (c) c.checked = saved.includeStageChanges;
+        }
+        if (typeof saved.includeRemovedLeads === 'boolean') {
+            const c = document.getElementById('includeRemovedLeads');
+            if (c) c.checked = saved.includeRemovedLeads;
+        }
+        if (saved.stageFieldId) stageFieldSelect.value = saved.stageFieldId;
+    } catch (_) { /* ignore */ }
     
     modal.classList.remove('hidden');
 }
@@ -3845,6 +3957,18 @@ function searchHistoricalChanges() {
     
     const stageFieldSelect = document.getElementById('stageFieldSelect');
     let fieldId = stageFieldSelect.value;
+
+    // Persist historical search settings
+    try {
+        localStorage.setItem('ui:historicalSearch', JSON.stringify({
+            startDate,
+            endDate,
+            includeNewLeads,
+            includeStageChanges,
+            includeRemovedLeads,
+            stageFieldId: fieldId || ''
+        }));
+    } catch (_) { /* ignore */ }
     
     if (!fieldId) {
         // Auto-detect stage field
@@ -4494,6 +4618,9 @@ function toggleAutoRefresh() {
             showNotification('Auto-refresh disabled', 'warning');
         }
     }
+
+    // Persist preference
+    try { localStorage.setItem('ui:autoRefreshEnabled', JSON.stringify(autoRefreshEnabled)); } catch (_) {}
 }
 
 function startAutoRefresh() {

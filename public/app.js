@@ -346,6 +346,8 @@ async function onListChange() {
         }
         
         hideLoading();
+        // Attempt to auto-load pipeline data if we have required selectors
+        tryAutoLoadPipelineDataIfRestored();
     } catch (error) {
         console.error('Error loading fields:', error);
         showNotification('Failed to load fields', 'error');
@@ -404,10 +406,14 @@ function populateFieldDropdown(selectId, fields, defaultType) {
                     defaultStageFieldSelect.appendChild(option);
                 });
                 
-                // Auto-select the stage field if it matches the current stage field selection
-                const stageFieldSelect = document.getElementById('stageField');
-                if (stageFieldSelect && stageFieldSelect.value) {
-                    defaultStageFieldSelect.value = stageFieldSelect.value;
+                // Prefer saved defaultSettings, otherwise mirror the selected stage field
+                if (defaultSettings && defaultSettings.defaultStageField) {
+                    defaultStageFieldSelect.value = defaultSettings.defaultStageField;
+                } else {
+                    const stageFieldSelect = document.getElementById('stageField');
+                    if (stageFieldSelect && stageFieldSelect.value) {
+                        defaultStageFieldSelect.value = stageFieldSelect.value;
+                    }
                 }
             }
         }
@@ -435,6 +441,10 @@ function populateFieldDropdown(selectId, fields, defaultType) {
                     option.textContent = field.name;
                     closedWonValueFieldSelect.appendChild(option);
                 });
+                // Restore saved selection for closed/won value field
+                if (defaultSettings && defaultSettings.closedWonValueField) {
+                    closedWonValueFieldSelect.value = defaultSettings.closedWonValueField;
+                }
             }
         }
         

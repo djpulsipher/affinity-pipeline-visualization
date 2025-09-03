@@ -7,6 +7,7 @@ let excludedStages = new Set(); // New: Track excluded stages
 let stageOrder = []; // New: Track custom stage order
 let isReorderMode = false; // New: Track reorder mode
 let individualLeadWeights = {}; // New: Track individual lead weights
+let didAutoLoadFromRestore = false; // Prevent duplicate auto-loads
 
 // Pipeline change tracking
 let pipelineHistory = []; // Array of historical pipeline snapshots
@@ -217,6 +218,54 @@ function initializeApp() {
     } catch (_) { /* ignore */ }
 }
 
+// Helpers for persisting per-list stage configuration
+function getCurrentOrSavedListId() {
+    const el = document.getElementById('listSelect');
+    return (el && el.value) || localStorage.getItem('ui:lastListId') || '';
+}
+
+function saveStageConfig() {
+    try {
+        const listId = getCurrentOrSavedListId();
+        if (!listId) return;
+        localStorage.setItem(`ui:stageWeights:${listId}`, JSON.stringify(stageWeights || {}));
+        localStorage.setItem(`ui:stageOrder:${listId}`, JSON.stringify(stageOrder || []));
+        localStorage.setItem(`ui:excludedStages:${listId}`, JSON.stringify(Array.from(excludedStages || [])));
+    } catch (_) { /* ignore */ }
+}
+
+function loadStageConfigForList(listId) {
+    if (!listId) return;
+    try {
+        const w = JSON.parse(localStorage.getItem(`ui:stageWeights:${listId}`) || '{}');
+        if (w && typeof w === 'object') stageWeights = w;
+        const order = JSON.parse(localStorage.getItem(`ui:stageOrder:${listId}`) || '[]');
+        if (Array.isArray(order)) stageOrder = order;
+        const excl = JSON.parse(localStorage.getItem(`ui:excludedStages:${listId}`) || '[]');
+        if (Array.isArray(excl)) excludedStages = new Set(excl);
+        // Ensure closed/won and lost stages remain excluded if configured
+        if (defaultSettings) {
+            if (defaultSettings.closedWonStage) excludedStages.add(defaultSettings.closedWonStage);
+            if (Array.isArray(defaultSettings.lostStages)) {
+                defaultSettings.lostStages.forEach(stage => excludedStages.add(stage));
+            }
+        }
+    } catch (_) { /* ignore */ }
+}
+
+function tryAutoLoadPipelineDataIfRestored() {
+    if (didAutoLoadFromRestore) return;
+    try {
+        const listId = document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+        const stageField = document.getElementById('stageField')?.value || localStorage.getItem('ui:stageField');
+        const valueField = document.getElementById('valueField')?.value || localStorage.getItem('ui:valueField');
+        if (listId && stageField && valueField) {
+            didAutoLoadFromRestore = true;
+            loadPipelineData().catch(() => { didAutoLoadFromRestore = false; });
+        }
+    } catch (_) { /* ignore */ }
+}
+
 // Load lists from Affinity API
 async function loadLists() {
     try {
@@ -245,8 +294,11 @@ async function loadLists() {
                     const savedListId = localStorage.getItem('ui:lastListId');
                     if (savedListId) {
                         listSelect.value = savedListId;
-                        // Trigger loading of fields for the restored list
-                        onListChange();
+                        // Load saved stage configuration for this list
+                        loadStageConfigForList(savedListId);
+                        // Trigger loading of fields for the restored list and then try auto-load
+                        await onListChange();
+                        tryAutoLoadPipelineDataIfRestored();
                     }
                 } catch (_) {}
             } else {
@@ -266,6 +318,10 @@ async function loadLists() {
 // Handle list selection change
 async function onListChange() {
     const listId = document.getElementById('listSelect').value;
+    // Load any saved stage configuration for this list
+    if (listId) {
+        loadStageConfigForList(listId);
+    }
     if (!listId) return;
 
     try {
@@ -650,9 +706,14 @@ function initializeStageWeights() {
         
         if (!currentData || !currentData.stages.length) return;
         
-        // Initialize stage order if not set
+        // Reconcile saved stage order with current stages
+        const currentStages = [...currentData.stages];
         if (stageOrder.length === 0) {
-            stageOrder = [...currentData.stages];
+            stageOrder = [...currentStages];
+        } else {
+            const validSaved = stageOrder.filter(s => currentStages.includes(s));
+            const missing = currentStages.filter(s => !validSaved.includes(s));
+            stageOrder = [...validSaved, ...missing];
         }
         
         // Create stage items in custom order
@@ -702,6 +763,8 @@ function initializeStageWeights() {
         
         // Add drag and drop functionality
         setupDragAndDrop();
+        // Persist after building
+        saveStageConfig();
     }
 }
 
@@ -714,6 +777,7 @@ function updateStageWeight(stage, weight) {
     }
     updateVisualization();
     updateSummaryStats();
+    saveStageConfig();
 }
 
 // Make weight value editable
@@ -792,6 +856,7 @@ function resetWeights() {
     initializeStageWeights();
     updateVisualization();
     updateSummaryStats();
+    saveStageConfig();
 }
 
 // Update visualization
@@ -1966,6 +2031,10 @@ function populateClosedWonStageValues() {
             option.textContent = stage;
             valueSelect.appendChild(option);
         });
+        // Apply saved closed/won selection
+        if (defaultSettings && defaultSettings.closedWonStage) {
+            valueSelect.value = defaultSettings.closedWonStage;
+        }
     }
 }
 
@@ -3066,6 +3135,7 @@ function toggleStageExclusion(stage, isExcluded) {
     // Update visualization
     updateVisualization();
     updateSummaryStats();
+    saveStageConfig();
 }
 
 // Setup drag and drop for stage reordering
@@ -3123,6 +3193,7 @@ function reorderStages(draggedStage, targetStage) {
         initializeStageWeights();
         // Update visualization
         updateVisualization();
+        saveStageConfig();
     }
 }
 

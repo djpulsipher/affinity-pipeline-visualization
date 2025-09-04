@@ -56,10 +56,12 @@
       case 'funnel':
         if (el.home) el.home.classList.remove('hidden');
         if (el.cardFunnel) el.cardFunnel.classList.remove('hidden');
+        setTimeout(() => { if (window.updateVisualization) window.updateVisualization(); }, 0);
         break;
       case 'stages':
         if (el.home) el.home.classList.remove('hidden');
         if (el.cardStages) el.cardStages.classList.remove('hidden');
+        setTimeout(() => { if (window.updateVisualization) window.updateVisualization(); }, 0);
         break;
       case 'home':
       default:
@@ -67,6 +69,7 @@
         if (el.home) el.home.classList.remove('hidden');
         // Show metrics, funnel, stages on home only
         [el.cardStageMetrics, el.cardFunnel, el.cardStages].forEach(c => c && c.classList.remove('hidden'));
+        setTimeout(() => { if (window.updateVisualization) window.updateVisualization(); }, 0);
         break;
     }
   }
@@ -124,6 +127,8 @@
         updateScrollLock();
       }
     });
+    const panel = m.querySelector('.drawer-panel');
+    if (panel) panel.addEventListener('click', (e) => e.stopPropagation());
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {

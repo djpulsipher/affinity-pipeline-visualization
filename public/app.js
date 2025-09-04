@@ -3345,6 +3345,65 @@ function updatePiggyBank() {
   // expose
   window.renderListView = render;
 })();
+
+// Enhanced List View V2: filters, drag-reorder, pinned offsets
+(function(){
+  function storageKey(listId){ return `ui:listView:config:${listId||'default'}`; }
+  function loadCfg(listId){ try { return JSON.parse(localStorage.getItem(storageKey(listId))||'{}'); } catch(_) { return {}; } }
+  function saveCfg(listId,cfg){ try { localStorage.setItem(storageKey(listId), JSON.stringify(cfg||{})); } catch(_){} }
+  function defaultView(){ return { columns:['Name','Stage','Value','Weighted','Last Contact'], pinned:['Name'], sort:{column:'Name',dir:'asc'}, filters:{} }; }
+  function available(){ const s=new Set(['Name','Stage','Value','Weighted','Last Contact']); try{ (currentData?.fields||[]).forEach(f=>s.add(f.name)); (currentData?.leads||[]).slice(0,50).forEach(l=>(l.field_values||[]).forEach(f=>f.name&&s.add(f.name))); }catch(_){} return Array.from(s); }
+  function str(v){ if(v==null) return ''; if(Array.isArray(v)) return v.map(str).join(', '); if(typeof v==='object') return v.name||v.text||v.title||v.value||v.data||''; return String(v); }
+  function cellVal(lead,label){ switch(label){ case 'Name': return lead.entity?.name||`Lead ${lead.id}`; case 'Stage': return lead.stage||''; case 'Value': return `$${formatCurrency(Number(lead.value)||0)}`; case 'Weighted': return `$${formatCurrency(calculateLeadWeightedValue(lead)||0)}`; case 'Last Contact': return lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : '—'; default: const fv=(lead.field_values||[]).find(f=>(f.name||'').toLowerCase()===label.toLowerCase()); const raw=fv?(f.value && Object.prototype.hasOwnProperty.call(f.value,'data')?f.value.data:f.value):null; return str(raw)||''; } }
+
+  async function renderListViewV2(){
+    const listId=document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+    const head=document.getElementById('listTableHead');
+    const body=document.getElementById('listTableBody');
+    const selector=document.getElementById('listViewSelect');
+    if(!head||!body) return;
+    if(!listId){ head.innerHTML=''; body.innerHTML='<tr><td>Select a list in Settings to view entries.</td></tr>'; return; }
+    if(!currentData||!currentData.leads?.length){ try{ await loadPipelineData(); }catch(_){} }
+
+    const avail=available();
+    const cfg=loadCfg(listId); cfg.views=cfg.views||{ 'Default': defaultView() }; cfg.currentView=cfg.currentView||'Default'; saveCfg(listId,cfg);
+    const view=cfg.views[cfg.currentView]||defaultView();
+    const cols=(view.columns||defaultView().columns).filter(c=>avail.includes(c));
+    const pinned=new Set(view.pinned||[]);
+    const sort=view.sort||{column:'Name',dir:'asc'};
+    const filters=view.filters||{};
+
+    if(selector){ selector.innerHTML=Object.keys(cfg.views).map(n=>`<option value="${n}">${n}</option>`).join(''); selector.value=cfg.currentView; selector.onchange=()=>{ cfg.currentView=selector.value; saveCfg(listId,cfg); renderListViewV2(); } }
+
+    let rows=(currentData?.leads||[]).slice();
+    rows=rows.filter(lead=>cols.every(label=>{ const q=(filters[label]||'').toString().trim().toLowerCase(); if(!q) return true; return cellVal(lead,label).toString().toLowerCase().includes(q); }));
+    rows.sort((a,b)=>{ const av=cellVal(a,sort.column).toString().toLowerCase(); const bv=cellVal(b,sort.column).toString().toLowerCase(); return sort.dir==='asc' ? (av>bv?1:av<bv?-1:0) : (av>bv?-1:av<bv?1:0); });
+
+    // head + filters
+    head.innerHTML=''; const thead=head.parentElement; let left=0;
+    cols.forEach(label=>{ const th=document.createElement('th'); th.textContent=label; th.dataset.col=label; th.style.cursor='pointer'; th.onclick=()=>{ const next=(sort.column===label && sort.dir==='asc')?'desc':'asc'; view.sort={column:label,dir:next}; cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); renderListViewV2(); }; if(pinned.has(label)){ th.classList.add('pinned'); th.style.setProperty('--pin-left', left+'px'); left+=160; } head.appendChild(th); });
+    let filterRow=thead.querySelector('tr.filters'); if(!filterRow){ filterRow=document.createElement('tr'); filterRow.className='filters'; thead.appendChild(filterRow); }
+    filterRow.innerHTML=''; cols.forEach(label=>{ const th=document.createElement('th'); const input=document.createElement('input'); input.type='text'; input.placeholder='Search'; input.value=filters[label]||''; input.oninput=(e)=>{ view.filters=Object.assign({}, view.filters, { [label]: e.target.value }); cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); renderListViewV2(); }; th.appendChild(input); filterRow.appendChild(th); });
+
+    // body
+    body.innerHTML = rows.map(lead=>`<tr>${cols.map(label=>`<td data-col="${label}"${pinned.has(label)?' class="pinned"':''}>${cellVal(lead,label)||'—'}</td>`).join('')}</tr>`).join('');
+    requestAnimationFrame(()=>{ const ths=[...head.children]; let acc=0; const leftMap={}; ths.forEach(th=>{ const lbl=th.getAttribute('data-col'); if(pinned.has(lbl)){ th.classList.add('pinned'); th.style.setProperty('--pin-left', acc+'px'); leftMap[lbl]=acc; acc+=th.getBoundingClientRect().width; }}); document.querySelectorAll('#listTableBody td.pinned').forEach(td=>{ const lbl=td.getAttribute('data-col'); const left=leftMap[lbl]||0; td.style.setProperty('--pin-left', left+'px'); }); });
+
+    // drawer lists + drag-reorder
+    const vis=document.getElementById('visibleCols'); const hid=document.getElementById('hiddenCols'); const drawer=document.getElementById('listColumnsDrawer'); const apply=document.getElementById('applyColumns'); const save=document.getElementById('saveListView'); const del=document.getElementById('deleteListView'); const nameInput=document.getElementById('viewName');
+    const setLists=()=>{ if(!vis||!hid) return; vis.innerHTML=cols.map(l=>`<li class="col-item" data-col="${l}" draggable="true"><span>${l}</span><div class="col-actions"><label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" class="pin" ${pinned.has(l)?'checked':''}/> Pin</label><button class="btn btn-outline up">▲</button><button class="btn btn-outline down">▼</button></div></li>`).join(''); const hidden=available().filter(a=>!cols.includes(a)); hid.innerHTML=hidden.map(l=>`<li class="col-item" data-col="${l}"><span>${l}</span><div class="col-actions"><button class="btn btn-outline add">Add</button></div></li>`).join(''); vis.querySelectorAll('li').forEach(li=>{ li.addEventListener('dragstart',e=>{ e.dataTransfer.setData('text/plain', li.dataset.col); }); li.addEventListener('dragover',e=>{ e.preventDefault(); }); li.addEventListener('drop',e=>{ e.preventDefault(); const dragged=e.dataTransfer.getData('text/plain'); const from=cols.indexOf(dragged); const to=cols.indexOf(li.dataset.col); if(from>-1&&to>-1&&from!==to){ const [m]=cols.splice(from,1); cols.splice(to,0,m); setLists(); } }); }); };
+    setLists();
+    if(vis){ vis.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('up')){ const i=cols.indexOf(label); if(i>0){ cols.splice(i,1); cols.splice(i-1,0,label); setLists(); } } else if(e.target.classList.contains('down')){ const i=cols.indexOf(label); if(i<cols.length-1){ cols.splice(i,1); cols.splice(i+1,0,label); setLists(); } } else if(e.target.classList.contains('pin')){ if(e.target.checked) pinned.add(label); else pinned.delete(label); } };
+      const panel=document.querySelector('#listColumnsDrawer .drawer-panel'); if(panel){ panel.addEventListener('click', ev=>ev.stopPropagation()); }
+    }
+    if(hid){ hid.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('add')){ cols.push(label); setLists(); } }; }
+    if(apply){ apply.onclick=()=>{ view.columns=cols.slice(); view.pinned=Array.from(pinned); view.filters=filters; cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); drawer?.classList.add('hidden'); renderListViewV2(); }; }
+    if(save){ save.onclick=()=>{ const nm=(nameInput?.value||'').trim(); if(!nm) return; cfg.views[nm]={ columns: cols.slice(), pinned:Array.from(pinned), sort:view.sort||{column:'Name',dir:'asc'}, filters:filters }; cfg.currentView=nm; saveCfg(listId,cfg); renderListViewV2(); }; }
+    if(del){ del.onclick=()=>{ if(cfg.currentView==='Default') return; delete cfg.views[cfg.currentView]; cfg.currentView='Default'; saveCfg(listId,cfg); renderListViewV2(); }; }
+  }
+  // override
+  window.renderListView = renderListViewV2;
+})();
 function toggleStageExclusion(stage, isExcluded) {
     if (isExcluded) {
         excludedStages.add(stage);

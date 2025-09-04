@@ -73,6 +73,8 @@ const TEAM_MEMBERS = [
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
+    // Attach renderer for UI router
+    window.renderListView = renderListView;
 });
 
 function initializeApp() {
@@ -3262,6 +3264,87 @@ function updatePiggyBank() {
 }
 
 // Toggle stage exclusion
+
+// ===============
+// Advanced List View (columns, sorting, pinned, saved views)
+// ===============
+(function(){
+  function storageKey(listId){ return `ui:listView:config:${listId||'default'}`; }
+  function loadCfg(listId){ try { return JSON.parse(localStorage.getItem(storageKey(listId))||'{}'); } catch(_) { return {}; } }
+  function saveCfg(listId, cfg){ try { localStorage.setItem(storageKey(listId), JSON.stringify(cfg||{})); } catch(_){} }
+  function defaultView(){ return { columns: ['Name','Stage','Value','Weighted','Last Contact'], pinned: ['Name'], sort: { column:'Name', dir:'asc' } }; }
+  function availableColumns(){
+    const base = new Set(['Name','Stage','Value','Weighted','Last Contact']);
+    try {
+      (currentData?.fields||[]).forEach(f=> base.add(f.name));
+      (currentData?.leads||[]).slice(0,50).forEach(lead => (lead.field_values||[]).forEach(fv => fv.name && base.add(fv.name)));
+    } catch(_){}
+    const preferred = ['Organization','Organizations','Owners','People','Source','First Email'];
+    preferred.forEach(p=>base.add(p));
+    return Array.from(base);
+  }
+  function strVal(v){ if(v==null) return ''; if(typeof v==='string'||typeof v==='number') return String(v); if(Array.isArray(v)) return v.map(strVal).join(', '); if(typeof v==='object') return v.name||v.text||v.title||v.value||v.data||''; return ''; }
+  function cell(lead,label){
+    switch(label){
+      case 'Name': return lead.entity?.name || `Lead ${lead.id}`;
+      case 'Stage': return lead.stage || '';
+      case 'Value': return `$${formatCurrency(Number(lead.value)||0)}`;
+      case 'Weighted': return `$${formatCurrency(calculateLeadWeightedValue(lead)||0)}`;
+      case 'Last Contact': return lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : '—';
+      default:
+        const fv=(lead.field_values||[]).find(f=> (f.name||'').toLowerCase()===label.toLowerCase());
+        const raw=fv? (f.value && Object.prototype.hasOwnProperty.call(f.value,'data')?f.value.data:f.value):null;
+        return strVal(raw)||'';
+    }
+  }
+  async function render(){
+    const listId=document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+    const head=document.getElementById('listTableHead');
+    const body=document.getElementById('listTableBody');
+    const viewSelect=document.getElementById('listViewSelect');
+    if(!head||!body) return;
+    if(!listId){ head.innerHTML=''; body.innerHTML='<tr><td>Select a list in Settings to view entries.</td></tr>'; return; }
+    if(!currentData||!currentData.leads?.length){ try{ await loadPipelineData(); }catch(_){} }
+
+    const available=availableColumns();
+    const cfg=loadCfg(listId);
+    cfg.views=cfg.views||{ 'Default': defaultView() };
+    cfg.currentView=cfg.currentView||'Default';
+    saveCfg(listId,cfg);
+    const view=cfg.views[cfg.currentView]||defaultView();
+
+    // toolbar
+    if(viewSelect){ viewSelect.innerHTML=Object.keys(cfg.views).map(v=>`<option value="${v}">${v}</option>`).join(''); viewSelect.value=cfg.currentView; viewSelect.onchange=()=>{ cfg.currentView=viewSelect.value; saveCfg(listId,cfg); render(); } }
+
+    const cols=(view.columns||defaultView().columns).filter(c=>available.includes(c));
+    const pinned=new Set(view.pinned||[]);
+    const sort=view.sort||{ column:'Name', dir:'asc' };
+
+    // sort rows
+    let rows=(currentData?.leads||[]).slice();
+    rows.sort((a,b)=>{ const av=cell(a,sort.column).toString().toLowerCase(); const bv=cell(b,sort.column).toString().toLowerCase(); return sort.dir==='asc' ? (av>bv?1:av<bv?-1:0) : (av>bv?-1:av<bv?1:0); });
+
+    // head
+    head.innerHTML='';
+    let left=0;
+    cols.forEach(label=>{ const th=document.createElement('th'); th.textContent=label; th.style.cursor='pointer'; th.onclick=()=>{ const next=(sort.column===label && sort.dir==='asc')?'desc':'asc'; view.sort={column:label,dir:next}; cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); render(); }; if(pinned.has(label)){ th.classList.add('pinned'); th.style.setProperty('--pin-left', left+'px'); left+=160; } head.appendChild(th); });
+
+    // body
+    body.innerHTML = rows.map(lead=> `<tr>${cols.map(label=>`<td${pinned.has(label)?' class="pinned"':''}>${cell(lead,label)||'—'}</td>`).join('')}</tr>`).join('');
+
+    // drawer populate
+    const vis=document.getElementById('visibleCols'); const hid=document.getElementById('hiddenCols'); const drawer=document.getElementById('listColumnsDrawer'); const apply=document.getElementById('applyColumns'); const save=document.getElementById('saveListView'); const del=document.getElementById('deleteListView'); const nameInput=document.getElementById('viewName');
+    const setLists=()=>{ if(!vis||!hid)return; vis.innerHTML=cols.map(l=>`<li class="col-item" data-col="${l}"><span>${l}</span><div class="col-actions"><label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" class="pin" ${pinned.has(l)?'checked':''}/> Pin</label><button class="btn btn-outline up">▲</button><button class="btn btn-outline down">▼</button></div></li>`).join(''); const hidden=available.filter(a=>!cols.includes(a)); hid.innerHTML=hidden.map(l=>`<li class="col-item" data-col="${l}"><span>${l}</span><div class="col-actions"><button class="btn btn-outline add">Add</button></div></li>`).join(''); };
+    setLists();
+    if(vis){ vis.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('up')){ const idx=cols.indexOf(label); if(idx>0){ cols.splice(idx,1); cols.splice(idx-1,0,label); setLists(); } } else if(e.target.classList.contains('down')){ const idx=cols.indexOf(label); if(idx<cols.length-1){ cols.splice(idx,1); cols.splice(idx+1,0,label); setLists(); } } else if(e.target.classList.contains('pin')){ if(e.target.checked) pinned.add(label); else pinned.delete(label); } }; }
+    if(hid){ hid.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('add')){ cols.push(label); setLists(); } }; }
+    if(apply){ apply.onclick=()=>{ view.columns=cols.slice(); view.pinned=Array.from(pinned); cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); drawer?.classList.add('hidden'); render(); }; }
+    if(save){ save.onclick=()=>{ const nm=(nameInput?.value||'').trim(); if(!nm) return; cfg.views[nm]={ columns: cols.slice(), pinned:Array.from(pinned), sort: view.sort||{column:'Name',dir:'asc'} }; cfg.currentView=nm; saveCfg(listId,cfg); render(); }; }
+    if(del){ del.onclick=()=>{ if(cfg.currentView==='Default') return; delete cfg.views[cfg.currentView]; cfg.currentView='Default'; saveCfg(listId,cfg); render(); }; }
+  }
+  // expose
+  window.renderListView = render;
+})();
 function toggleStageExclusion(stage, isExcluded) {
     if (isExcluded) {
         excludedStages.add(stage);

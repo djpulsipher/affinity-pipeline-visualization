@@ -109,7 +109,7 @@
   }
 
   // Manage body scroll lock when any modal is open
-  const modals = Array.from(document.querySelectorAll('.modal, .rule-modal'));
+  const modals = Array.from(document.querySelectorAll('.modal, .rule-modal, .drawer'));
   const updateScrollLock = () => {
     const anyOpen = modals.some(m => !m.classList.contains('hidden'));
     document.body.classList.toggle('modal-open', anyOpen);
@@ -118,7 +118,7 @@
     ['click','transitionend'].forEach(ev => on(m, ev, updateScrollLock));
     // Close on overlay click if clicked outside content
     on(m, 'click', (e) => {
-      const content = m.querySelector('.modal-content, .rule-modal-content');
+      const content = m.querySelector('.modal-content, .rule-modal-content, .drawer-panel');
       if (content && !content.contains(e.target)) {
         m.classList.add('hidden');
         updateScrollLock();
@@ -150,4 +150,13 @@
   // Initial route
   const initial = localStorage.getItem('lastView') || 'home';
   showView(initial);
+
+  // List View toolbar events
+  const customizeBtn = qs('#customizeListView');
+  const listDrawer = qs('#listColumnsDrawer');
+  const closeDrawerBtn = listDrawer?.querySelector('.close');
+  on(customizeBtn, 'click', () => listDrawer?.classList.remove('hidden'));
+  on(closeDrawerBtn, 'click', () => listDrawer?.classList.add('hidden'));
+  on(qs('#cancelColumns'), 'click', () => listDrawer?.classList.add('hidden'));
+  // Apply will be bound in app.js after options are populated
 })();

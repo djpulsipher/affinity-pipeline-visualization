@@ -280,7 +280,15 @@
 
         <!-- List View -->
         <section id="view-list" class="card hidden">
-          <div class="section-header"><h3><i class="fas fa-table"></i> List View</h3></div>
+          <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+            <h3 style="margin:0;"><i class="fas fa-table"></i> List View</h3>
+            <div class="list-toolbar" style="display:flex;align-items:center;gap:8px;">
+              <select id="listViewSelect" class="form-control" style="max-width:220px;"></select>
+              <button id="saveListView" class="btn btn-outline"><i class="fas fa-save"></i> Save View</button>
+              <button id="deleteListView" class="btn btn-outline"><i class="fas fa-trash"></i> Delete</button>
+              <button id="customizeListView" class="btn btn-primary"><i class="fas fa-sliders-h"></i> Customize</button>
+            </div>
+          </div>
           <div class="table-wrapper">
             <table id="listTable" class="data-table">
               <thead><tr id="listTableHead"></tr></thead>
@@ -288,6 +296,37 @@
             </table>
           </div>
         </section>
+
+        <!-- Drawer: Customize List Columns -->
+        <div id="listColumnsDrawer" class="drawer hidden">
+          <div class="drawer-panel">
+            <div class="drawer-header">
+              <h3><i class="fas fa-sliders-h"></i> Customize Columns</h3>
+              <button class="close" aria-label="Close">&times;</button>
+            </div>
+            <div class="drawer-body">
+              <div class="form-group">
+                <label for="viewName">View Name</label>
+                <input id="viewName" type="text" class="form-control" placeholder="e.g., Owners Focus">
+              </div>
+              <div class="columns-config">
+                <div class="columns-list">
+                  <h4>Visible Columns</h4>
+                  <ul id="visibleCols" class="cols"></ul>
+                </div>
+                <div class="columns-list">
+                  <h4>Hidden Columns</h4>
+                  <ul id="hiddenCols" class="cols"></ul>
+                </div>
+              </div>
+              <p class="hint">Pin columns to keep them fixed on the left. Use up/down to reorder.</p>
+            </div>
+            <div class="drawer-footer" style="display:flex;justify-content:flex-end;gap:8px;">
+              <button id="cancelColumns" class="btn btn-secondary">Cancel</button>
+              <button id="applyColumns" class="btn btn-primary">Apply</button>
+            </div>
+          </div>
+        </div>
         <!-- Changes (view: changes) -->
         <section id="view-changes" class="pipeline-changes-section card hidden">
           <div class="section-header">
@@ -322,8 +361,8 @@
     </div>
   </div>
 
-  <div id="leadWeightModal" class="modal hidden">
-    <div class="modal-content">
+  <div id="leadWeightModal" class="drawer hidden">
+    <div class="drawer-panel">
       <span class="close">&times;</span>
       <h3>Adjust Lead Weight</h3>
       <div class="lead-weight-form">
@@ -353,8 +392,8 @@
     </div>
   </div>
 
-  <div id="ruleModal" class="rule-modal hidden">
-    <div class="rule-modal-content">
+  <div id="ruleModal" class="drawer hidden">
+    <div class="drawer-panel">
       <span class="close">&times;</span>
       <h3>Default Value Rule</h3>
       <form id="ruleForm" class="rule-form">

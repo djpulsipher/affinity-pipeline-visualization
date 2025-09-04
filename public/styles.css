@@ -2477,6 +2477,7 @@ body {
     .summary-stats {
         gap: 10px;
     }
+}
 
 @media (max-width:768px){
     .funnel-viz{ min-height:400px; }

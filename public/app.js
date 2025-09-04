@@ -76,6 +76,20 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeApp() {
+    // Initialize theme from saved preference
+    try {
+        const savedTheme = localStorage.getItem('ui:theme') || 'light';
+        setTheme(savedTheme);
+        const switchEl = document.getElementById('themeSwitch');
+        if (switchEl) {
+            switchEl.checked = (savedTheme === 'dark');
+            switchEl.addEventListener('change', () => {
+                const next = switchEl.checked ? 'dark' : 'light';
+                setTheme(next);
+                try { localStorage.setItem('ui:theme', next); } catch (_) {}
+            });
+        }
+    } catch (_) { /* ignore theme init errors */ }
     // Warn if we're on a Vercel preview URL (localStorage tied to subdomain)
     try {
         const host = window.location.hostname || '';
@@ -216,6 +230,16 @@ function initializeApp() {
             }
         }
     } catch (_) { /* ignore */ }
+}
+
+// Theme helper
+function setTheme(mode) {
+    const root = document.documentElement;
+    if (mode === 'dark') {
+        root.setAttribute('data-theme', 'dark');
+    } else {
+        root.setAttribute('data-theme', 'light');
+    }
 }
 
 // Helpers for persisting per-list stage configuration

@@ -13,6 +13,7 @@
     { "src": "/api/opportunities", "dest": "/api/opportunities.js" },
     { "src": "/api/fields/(?<fieldId>[^/]+)/definition", "dest": "/api/fields/[fieldId]/definition.js?fieldId=$fieldId" },
     { "src": "/api/test-fields/(?<listId>[^/]+)", "dest": "/api/test-fields/[listId].js?listId=$listId" },
+    { "src": "/api/compare-lists", "dest": "/api/compare-lists.js" },
     { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }

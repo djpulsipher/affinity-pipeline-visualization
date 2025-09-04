@@ -266,6 +266,17 @@ function tryAutoLoadPipelineDataIfRestored() {
     } catch (_) { /* ignore */ }
 }
 
+function updateListOptionCount(listId, count) {
+    const listSelect = document.getElementById('listSelect');
+    if (!listSelect) return;
+    const option = Array.from(listSelect.options).find(o => String(o.value) === String(listId));
+    if (option) {
+        // Keep the name prefix as-is, update/append count suffix
+        const name = option.textContent.replace(/\s*\(.*entries\)\s*$/i, '');
+        option.textContent = `${name} (${count} entries)`;
+    }
+}
+
 // Load lists from Affinity API
 async function loadLists() {
     try {
@@ -284,8 +295,14 @@ async function loadLists() {
                 lists.forEach(list => {
                     const option = document.createElement('option');
                     option.value = list.id;
-                    const count = list.list_size || list.entry_count || list.entryCount || list.size || 0;
-                    option.textContent = `${list.name} (${count} entries)`;
+                    // Prefer cached count; the lists API often doesn't include size
+                    let cached = null;
+                    try { cached = localStorage.getItem(`ui:listSize:${list.id}`); } catch (_) {}
+                    if (cached && !isNaN(parseInt(cached, 10))) {
+                        option.textContent = `${list.name} (${parseInt(cached, 10)} entries)`;
+                    } else {
+                        option.textContent = list.name;
+                    }
                     listSelect.appendChild(option);
                 });
 
@@ -515,7 +532,7 @@ async function loadPipelineData() {
         initializeStageWeights();
         updateVisualization();
         updateSummaryStats();
-        
+
         // Save pipeline snapshot for change tracking
         savePipelineSnapshot();
         
@@ -525,6 +542,15 @@ async function loadPipelineData() {
         // Populate closed/won stage values
         populateClosedWonStageValues();
         populateLostStageValues();
+        // Update list entry count display and cache
+        try {
+            const count = currentData?.totalLeads || currentData?.leads?.length || 0;
+            if (listId) {
+                localStorage.setItem(`ui:listSize:${listId}`, String(count));
+                updateListOptionCount(listId, count);
+            }
+        } catch (_) {}
+        updatePiggyBank();
         
         hideLoading();
         showNotification(`Pipeline data loaded successfully! Found ${currentData.leads.length} leads across ${currentData.stages.length} stages.`, 'success');
@@ -3044,51 +3070,49 @@ function updatePiggyBank() {
     
     // Calculate closed/won value
     let closedWonValue = 0;
-    if (currentData && currentData.leads && defaultSettings.closedWonStage && defaultSettings.closedWonValueField) {
+    if (currentData && currentData.leads && defaultSettings.closedWonStage) {
         const closedWonLeads = currentData.leads.filter(lead => lead.stage === defaultSettings.closedWonStage);
         console.log(`Found ${closedWonLeads.length} leads in closed/won stage: ${defaultSettings.closedWonStage}`);
-        console.log('Available fields:', currentData.fields?.map(f => ({ id: f.id, name: f.name })));
-        console.log('Looking for field:', defaultSettings.closedWonValueField);
-        
-        closedWonValue = closedWonLeads.reduce((sum, lead) => {
-            console.log(`Processing lead ${lead.id} field values:`, lead.field_values?.map(fv => ({
-                entityAttributeId: fv.entityAttributeId,
-                field_id: fv.field_id,
-                value: fv.value
-            })));
-            
-            // Find the value field for committed amount
-            const valueField = lead.field_values.find(fv => {
-                // Check if currentData.fields exists before using it
-                if (!currentData.fields) {
-                    // If fields is not available, try to match by field name directly
-                    // This is a fallback for when the fields data structure is not available
-                    return false;
+
+        // Prefer the already-processed lead.value (processPipelineData sets it from the configured field)
+        closedWonValue = closedWonLeads.reduce((sum, lead) => sum + (Number(lead.value) || 0), 0);
+
+        // If still zero and a field was selected, try extracting directly from field_values (robustly)
+        if (closedWonValue === 0 && defaultSettings.closedWonValueField) {
+            const toNumber = (val) => {
+                if (val == null) return 0;
+                if (typeof val === 'number') return val;
+                if (typeof val === 'string') {
+                    // strip currency and thousands separators
+                    const cleaned = val.replace(/[$,\s]/g, '');
+                    const num = parseFloat(cleaned);
+                    return isNaN(num) ? 0 : num;
                 }
-                // Use entityAttributeId instead of field_id (based on HAR file structure)
-                const fieldId = fv.entityAttributeId || fv.field_id;
-                const field = currentData.fields.find(f => f.id == fieldId);
-                const matches = field && field.name === defaultSettings.closedWonValueField;
-                if (matches) {
-                    console.log(`Found matching field for lead ${lead.id}: ${field.name} = ${fv.value}`);
-                }
-                return matches;
-            });
-            
-            const fieldValue = parseFloat(valueField?.value) || 0;
-            console.log(`Lead ${lead.id} value: ${fieldValue}`);
-            return sum + fieldValue;
-        }, 0);
-        
-        console.log(`Total closed/won value: ${closedWonValue}`);
-        
-        // Fallback: if no value found, try to use the lead's value field directly
-        if (closedWonValue === 0 && closedWonLeads.length > 0) {
-            console.log('No value found using field matching, trying fallback method...');
+                return 0;
+            };
+
+            const getFieldNameById = (id) => {
+                const field = currentData.fields?.find(f => String(f.id) === String(id));
+                return field?.name;
+            };
+
             closedWonValue = closedWonLeads.reduce((sum, lead) => {
-                return sum + (lead.value || 0);
+                let matched = 0;
+                (lead.field_values || []).forEach(fv => {
+                    const possibleId = fv.id || fv.field_id || fv.entityAttributeId;
+                    const name = fv.name || getFieldNameById(possibleId);
+                    let raw = null;
+                    if (name === defaultSettings.closedWonValueField) {
+                        if (fv.value && Object.prototype.hasOwnProperty.call(fv.value, 'data')) {
+                            raw = fv.value.data;
+                        } else {
+                            raw = fv.value;
+                        }
+                        matched += toNumber(raw);
+                    }
+                });
+                return sum + matched;
             }, 0);
-            console.log(`Fallback closed/won value: ${closedWonValue}`);
         }
     }
     

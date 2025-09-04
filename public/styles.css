@@ -2562,7 +2562,8 @@ body { font-family: var(--font-sans); background: radial-gradient(1200px 800px a
 .lead-bubble.low-value { fill: var(--accent-red); }
 
 /* Modals */
-.modal-content { background-color: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); color: var(--text); }
+.modal-content { background-color: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); color: var(--text); width: min(960px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; }
+.modal .large-modal { width: min(1200px, calc(100vw - 48px)); max-height: calc(100vh - 48px); }
 .close { color: var(--text-muted); }
 
 /* Summary stats */

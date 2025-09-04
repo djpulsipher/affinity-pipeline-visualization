@@ -46,5 +46,43 @@
     const mo = new MutationObserver(mirror);
     mo.observe(legacySummary, { childList: true, subtree: true, characterData: true });
   }
-})();
 
+  // Manage body scroll lock when any modal is open
+  const modals = Array.from(document.querySelectorAll('.modal, .rule-modal'));
+  const updateScrollLock = () => {
+    const anyOpen = modals.some(m => !m.classList.contains('hidden'));
+    document.body.classList.toggle('modal-open', anyOpen);
+  };
+  modals.forEach(m => {
+    ['click','transitionend'].forEach(ev => on(m, ev, updateScrollLock));
+    // Close on overlay click if clicked outside content
+    on(m, 'click', (e) => {
+      const content = m.querySelector('.modal-content, .rule-modal-content');
+      if (content && !content.contains(e.target)) {
+        m.classList.add('hidden');
+        updateScrollLock();
+      }
+    });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      modals.forEach(m => m.classList.add('hidden'));
+      updateScrollLock();
+    }
+  });
+  updateScrollLock();
+
+  // Theme toggle (persisted)
+  const themeSwitch = qs('#themeSwitch');
+  const root = document.documentElement;
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme) root.setAttribute('data-theme', savedTheme);
+  if (themeSwitch) {
+    themeSwitch.checked = root.getAttribute('data-theme') === 'dark';
+    on(themeSwitch, 'change', () => {
+      const mode = themeSwitch.checked ? 'dark' : 'light';
+      root.setAttribute('data-theme', mode);
+      localStorage.setItem('theme', mode);
+    });
+  }
+})();

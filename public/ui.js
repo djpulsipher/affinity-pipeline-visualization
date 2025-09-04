@@ -3,25 +3,74 @@
   const qs = (s) => document.querySelector(s);
   const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
 
-  // Toggle settings panel visibility
-  on(qs('#toggleConfig'), 'click', () => {
-    const panel = qs('#settings');
-    if (!panel) return;
-    panel.classList.toggle('collapsed');
-    // Smooth scroll back to panel when opening
-    if (!panel.classList.contains('collapsed')) {
-      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Views: home, funnel, stages, changes, settings
+  const el = {
+    nav: document.getElementById('sideNav'),
+    homeStats: qs('#home-stats'),
+    home: qs('#view-home'),
+    changes: qs('#view-changes'),
+    settings: qs('#view-settings'),
+    cardFunnel: qs('#card-funnel'),
+    cardStages: qs('#card-stages'),
+    cardGoal: qs('#card-goal'),
+    cardLegend: qs('#card-legend'),
+  };
+
+  function setActiveNav(view) {
+    document.querySelectorAll('.nav-item').forEach(a => {
+      a.classList.toggle('active', a.dataset.view === view);
+    });
+  }
+
+  function showView(view) {
+    localStorage.setItem('lastView', view);
+    setActiveNav(view);
+
+    // Reset visibility
+    if (el.home) el.home.classList.add('hidden');
+    if (el.changes) el.changes.classList.add('hidden');
+    if (el.settings) el.settings.classList.add('hidden');
+    if (el.homeStats) el.homeStats.classList.add('hidden');
+
+    // default: hide all cards
+    [el.cardFunnel, el.cardStages, el.cardGoal, el.cardLegend].forEach(c => c && c.classList.add('hidden'));
+
+    switch (view) {
+      case 'settings':
+        if (el.settings) el.settings.classList.remove('hidden');
+        break;
+      case 'changes':
+        if (el.changes) el.changes.classList.remove('hidden');
+        break;
+      case 'funnel':
+        if (el.home) el.home.classList.remove('hidden');
+        if (el.cardFunnel) el.cardFunnel.classList.remove('hidden');
+        break;
+      case 'stages':
+        if (el.home) el.home.classList.remove('hidden');
+        if (el.cardStages) el.cardStages.classList.remove('hidden');
+        break;
+      case 'home':
+      default:
+        if (el.homeStats) el.homeStats.classList.remove('hidden');
+        if (el.home) el.home.classList.remove('hidden');
+        [el.cardFunnel, el.cardStages, el.cardGoal, el.cardLegend].forEach(c => c && c.classList.remove('hidden'));
+        break;
     }
+  }
+
+  // Sidebar navigation
+  on(el.nav, 'click', (e) => {
+    const target = e.target.closest('.nav-item');
+    if (!target) return;
+    e.preventDefault();
+    const view = target.dataset.view;
+    if (view) showView(view);
   });
 
-  // Open settings from sidebar
-  on(qs('#openSettings'), 'click', (e) => {
-    const panel = qs('#settings');
-    if (!panel) return;
-    panel.classList.remove('collapsed');
-    // allow default hash behavior then smooth scroll
-    setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-  });
+  // Topbar Config button -> Settings view
+  on(qs('#toggleConfig'), 'click', () => showView('settings'));
+  on(qs('#openSettings'), 'click', (e) => { e.preventDefault(); showView('settings'); });
 
   // Mirror legacy stat IDs if older code updates them
   // (Leave in place in case some code writes to *_legacy.)
@@ -85,4 +134,8 @@
       localStorage.setItem('theme', mode);
     });
   }
+
+  // Initial route
+  const initial = localStorage.getItem('lastView') || 'home';
+  showView(initial);
 })();

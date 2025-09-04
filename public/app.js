@@ -277,6 +277,27 @@ function updateListOptionCount(listId, count) {
     }
 }
 
+// After data/population, re-apply saved default settings to selects
+function applySavedDefaultSelections() {
+    try {
+        const dsf = document.getElementById('defaultStageField');
+        const dsv = document.getElementById('defaultStageValue');
+        const cws = document.getElementById('closedWonStage');
+        const cwv = document.getElementById('closedWonValueField');
+        const ls = document.getElementById('lostStages');
+
+        if (defaultSettings) {
+            if (dsf && defaultSettings.defaultStageField) dsf.value = defaultSettings.defaultStageField;
+            if (dsv && defaultSettings.defaultStageValue) dsv.value = defaultSettings.defaultStageValue;
+            if (cws && defaultSettings.closedWonStage) cws.value = defaultSettings.closedWonStage;
+            if (cwv && defaultSettings.closedWonValueField) cwv.value = defaultSettings.closedWonValueField;
+            if (ls && Array.isArray(defaultSettings.lostStages) && defaultSettings.lostStages.length > 0) {
+                ls.value = defaultSettings.lostStages[0];
+            }
+        }
+    } catch (_) { /* ignore */ }
+}
+
 // Load lists from Affinity API
 async function loadLists() {
     try {
@@ -529,6 +550,8 @@ async function loadPipelineData() {
             throw new Error('No leads found with the selected stage field. Please check your field selections.');
         }
         
+        // Re-load any saved per-list stage config now that stages are known
+        loadStageConfigForList(listId);
         initializeStageWeights();
         updateVisualization();
         updateSummaryStats();
@@ -539,9 +562,10 @@ async function loadPipelineData() {
         // Populate default stage values if a field is selected
         await populateDefaultStageValues();
         
-        // Populate closed/won stage values
+        // Populate closed/won and lost stage dropdowns (then apply saved selections)
         populateClosedWonStageValues();
         populateLostStageValues();
+        applySavedDefaultSelections();
         // Update list entry count display and cache
         try {
             const count = currentData?.totalLeads || currentData?.leads?.length || 0;

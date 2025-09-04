@@ -1616,6 +1616,51 @@ function updateSummaryStats() {
     }
 }
 
+// Render List View table from currentData
+async function renderListView() {
+    const head = document.getElementById('listTableHead');
+    const body = document.getElementById('listTableBody');
+    if (!head || !body) return;
+
+    const listId = document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+    if (!listId) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td>Select a list in Settings to view entries.</td></tr>';
+        return;
+    }
+
+    if (!currentData || !currentData.leads || currentData.leads.length === 0) {
+        try { await loadPipelineData(); } catch (_) {}
+    }
+
+    const rows = (currentData?.leads || []).map(lead => ({
+        name: lead.entity?.name || `Lead ${lead.id}`,
+        stage: lead.stage || '-',
+        value: Number(lead.value) || 0,
+        weighted: calculateLeadWeightedValue(lead) || 0,
+        lastContact: lead.lastContact ? new Date(lead.lastContact) : null,
+    }));
+
+    head.innerHTML = ['Name','Stage','Value','Weighted','Last Contact'].map(h => `<th>${h}</th>`).join('');
+    const fmtDate = (d) => d ? d.toLocaleDateString() : '—';
+    if (rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="5">No entries found for this list.</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.name}</td>
+          <td><span class="badge">${r.stage}</span></td>
+          <td>$${formatCurrency(r.value)}</td>
+          <td>$${formatCurrency(r.weighted)}</td>
+          <td>${fmtDate(r.lastContact)}</td>
+        </tr>
+    `).join('');
+}
+
+// Expose for UI router
+window.renderListView = renderListView;
+
 // Create legend
 function createLegend() {
     const legendContainer = document.getElementById('legendItems');
@@ -3167,6 +3212,8 @@ function updatePiggyBank() {
     // Update the display values
     const closedWonValueElement = document.getElementById('closedWonValue');
     const goalProgressElement = document.getElementById('goalProgress');
+    const cwGoal = document.getElementById('closedWonValue_goal');
+    const gpGoal = document.getElementById('goalProgress_goal');
     
     if (closedWonValueElement) {
         closedWonValueElement.textContent = formatCurrency(closedWonValue);
@@ -3175,6 +3222,13 @@ function updatePiggyBank() {
     if (goalProgressElement) {
         const progressPercent = Math.min(100, (closedWonValue / 100000000) * 100);
         goalProgressElement.textContent = `${progressPercent.toFixed(1)}%`;
+    }
+    if (cwGoal) cwGoal.textContent = formatCurrency(closedWonValue);
+    if (gpGoal) {
+        const p = Math.min(100, (closedWonValue / 100000000) * 100);
+        gpGoal.textContent = `${p.toFixed(1)}%`;
+        const fill = document.getElementById('goalProgressFill');
+        if (fill) fill.style.width = `${p}%`;
     }
     
     // Create progress bar visualization
@@ -3194,7 +3248,18 @@ function updatePiggyBank() {
             </div>
         </div>
     `;
-} 
+
+    // Pipeline coverage of remaining goal
+    try {
+        const weighted = currentData?.leads?.reduce((sum, l) => sum + calculateLeadWeightedValue(l), 0) || 0;
+        const remaining = Math.max(0, 100000000 - closedWonValue);
+        const coveragePct = remaining > 0 ? Math.min(100, (weighted / remaining) * 100) : 100;
+        const wpEl = document.getElementById('weightedPipeline_goal');
+        const covEl = document.getElementById('pipelineCoveragePct');
+        if (wpEl) wpEl.textContent = formatCurrency(weighted);
+        if (covEl) covEl.textContent = `${coveragePct.toFixed(1)}%`;
+    } catch (_) {}
+}
 
 // Toggle stage exclusion
 function toggleStageExclusion(stage, isExcluded) {

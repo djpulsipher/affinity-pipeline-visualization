@@ -8,12 +8,14 @@
     nav: document.getElementById('sideNav'),
     homeStats: qs('#home-stats'),
     home: qs('#view-home'),
+    goal: qs('#view-goal'),
     changes: qs('#view-changes'),
     settings: qs('#view-settings'),
     cardFunnel: qs('#card-funnel'),
     cardStages: qs('#card-stages'),
     cardGoal: qs('#card-goal'),
-    cardLegend: qs('#card-legend'),
+    cardStageMetrics: qs('#card-stage-metrics'),
+    list: qs('#view-list'),
   };
 
   function setActiveNav(view) {
@@ -31,9 +33,11 @@
     if (el.changes) el.changes.classList.add('hidden');
     if (el.settings) el.settings.classList.add('hidden');
     if (el.homeStats) el.homeStats.classList.add('hidden');
+    if (el.goal) el.goal.classList.add('hidden');
+    if (el.list) el.list.classList.add('hidden');
 
     // default: hide all cards
-    [el.cardFunnel, el.cardStages, el.cardGoal, el.cardLegend].forEach(c => c && c.classList.add('hidden'));
+    [el.cardFunnel, el.cardStages, el.cardGoal, el.cardStageMetrics].forEach(c => c && c.classList.add('hidden'));
 
     switch (view) {
       case 'settings':
@@ -41,6 +45,13 @@
         break;
       case 'changes':
         if (el.changes) el.changes.classList.remove('hidden');
+        break;
+      case 'goal':
+        if (el.goal) el.goal.classList.remove('hidden');
+        break;
+      case 'list':
+        if (el.list) el.list.classList.remove('hidden');
+        if (window.renderListView) window.renderListView();
         break;
       case 'funnel':
         if (el.home) el.home.classList.remove('hidden');
@@ -54,7 +65,8 @@
       default:
         if (el.homeStats) el.homeStats.classList.remove('hidden');
         if (el.home) el.home.classList.remove('hidden');
-        [el.cardFunnel, el.cardStages, el.cardGoal, el.cardLegend].forEach(c => c && c.classList.remove('hidden'));
+        // Show metrics, funnel, stages on home only
+        [el.cardStageMetrics, el.cardFunnel, el.cardStages].forEach(c => c && c.classList.remove('hidden'));
         break;
     }
   }

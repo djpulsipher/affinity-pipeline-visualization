@@ -24,6 +24,8 @@
         <a href="#" class="nav-item active" data-view="home"><i class="fas fa-house"></i> <span>Home</span></a>
         <a href="#" class="nav-item" data-view="funnel"><i class="fas fa-filter"></i> <span>Funnel</span></a>
         <a href="#" class="nav-item" data-view="stages"><i class="fas fa-chart-bar"></i> <span>Stage Breakdown</span></a>
+        <a href="#" class="nav-item" data-view="goal"><i class="fas fa-piggy-bank"></i> <span>Goal Tracker</span></a>
+        <a href="#" class="nav-item" data-view="list"><i class="fas fa-table"></i> <span>List View</span></a>
         <a href="#" class="nav-item" data-view="changes"><i class="fas fa-history"></i> <span>Changes</span></a>
         <a href="#" class="nav-item" data-view="settings" id="openSettings"><i class="fas fa-sliders-h"></i> <span>Settings</span></a>
       </nav>
@@ -215,7 +217,7 @@
               </div>
             </div>
 
-            <div class="stage-metrics-container">
+            <div id="card-stage-metrics" class="stage-metrics-container">
               <div id="stageAges" class="stage-metrics-content"><p>No stage data available</p></div>
             </div>
 
@@ -253,13 +255,39 @@
               </div>
             </div>
           </section>
-
-          <section id="card-legend" class="legend card">
-            <h4>Legend</h4>
-            <div id="legendItems" class="legend-items"></div>
-          </section>
         </section>
 
+        <!-- Goal (view: goal) -->
+        <section id="view-goal" class="closed-won-summary card hidden">
+          <div class="config-section">
+            <h3><i class="fas fa-piggy-bank"></i> $100M Goal Tracker</h3>
+            <div class="goal-tracker">
+              <div class="goal-stats">
+                <div class="stat"><span class="stat-label">Closed/Won Value:</span><span id="closedWonValue_goal" class="stat-value">$0</span></div>
+                <div class="stat"><span class="stat-label">Progress to Goal:</span><span id="goalProgress_goal" class="stat-value">0%</span></div>
+              </div>
+              <div id="goalProgressBar" class="goal-progress-container">
+                <div class="goal-progress-bar"><div id="goalProgressFill" class="goal-progress-fill" style="width:0%"></div></div>
+                <div class="goal-labels"><span>0</span><span>$100M</span></div>
+              </div>
+              <div class="goal-stats">
+                <div class="stat"><span class="stat-label">Weighted Pipeline</span><span id="weightedPipeline_goal" class="stat-value">$0</span></div>
+                <div class="stat"><span class="stat-label">Coverage of Remaining Goal</span><span id="pipelineCoveragePct" class="stat-value">0%</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- List View -->
+        <section id="view-list" class="card hidden">
+          <div class="section-header"><h3><i class="fas fa-table"></i> List View</h3></div>
+          <div class="table-wrapper">
+            <table id="listTable" class="data-table">
+              <thead><tr id="listTableHead"></tr></thead>
+              <tbody id="listTableBody"><tr><td>Load a list in Settings to view entries.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
         <!-- Changes (view: changes) -->
         <section id="view-changes" class="pipeline-changes-section card hidden">
           <div class="section-header">
@@ -398,4 +426,3 @@
   <script src="ui.js"></script>
 </body>
 </html>
-

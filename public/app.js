@@ -1701,8 +1701,9 @@ function createLegend() {
 
 // Show stage details
 function showStageDetails(stageData) {
-    const modal = document.getElementById('leadModal');
-    const content = document.getElementById('modalContent');
+    const drawer = document.getElementById('stageDrawer');
+    const title = document.getElementById('stageDrawerTitle');
+    const body = document.getElementById('stageDrawerBody');
     
     // Calculate average last contact time for this stage
     const averageContactDays = calculateAverageContactDays(stageData.leads);
@@ -1713,73 +1714,42 @@ function showStageDetails(stageData) {
     // Get change statistics for this stage
     const changeStats = getStageChangeStats(stageData.stage);
     
-    content.innerHTML = `
-        <h3>${stageData.stage} Stage</h3>
-        <div class="stage-stats">
-            <p><strong>Total Value:</strong> $${formatCurrency(stageData.totalValue)}</p>
-            <p><strong>Weighted Value:</strong> $${formatCurrency(stageData.weightedValue)}</p>
-            <p><strong>Number of Leads:</strong> ${stageData.count}</p>
-            <p><strong>Stage Weight:</strong> ${stageWeights[stageData.stage] || 1}x</p>
-            ${averageContactDays !== null ? `<p><strong>Average Days Since Last Contact:</strong> <span style="color: ${getContactUrgencyColor(averageContactDays + ' days ago')};">${averageContactDays} days</span></p>` : ''}
-            ${averageLeadAge !== null ? `<p><strong>Average Lead Age:</strong> ${averageLeadAge} days</p>` : ''}
+    title.innerHTML = `<i class="fas fa-layer-group"></i> ${stageData.stage}`;
+    const kpi = (label, value) => `<div style="display:flex;flex-direction:column;gap:4px;"><span class="stat-label">${label}</span><span class="stat-value">${value}</span></div>`;
+    const leadsTop = stageData.leads.slice().sort((a,b)=> (b.value)-(a.value)).slice(0,5);
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-bottom:16px;">
+        ${kpi('Total Value', `$${formatCurrency(stageData.totalValue)}`)}
+        ${kpi('Weighted', `$${formatCurrency(stageData.weightedValue)}`)}
+        ${kpi('Leads', `${stageData.count}`)}
+        ${kpi('Stage Weight', `${stageWeights[stageData.stage] || 1}x`)}
+      </div>
+      <div style="display:grid;grid-template-columns: 1fr 1fr; gap:16px;">
+        <div class="card" style="padding:12px;">
+          <h4 style="margin-bottom:8px;">Activity</h4>
+          <div>${averageLeadAge !== null ? `Avg Age: <strong>${averageLeadAge} days</strong>` : 'Avg Age: —'}</div>
+          <div>${averageContactDays !== null ? `Avg Last Contact: <strong>${averageContactDays} days</strong>` : 'Avg Last Contact: —'}</div>
         </div>
-        
-        ${changeStats.hasChanges ? `
-        <div class="stage-changes">
-            <h4><i class="fas fa-history"></i> Recent Changes (Past 7 Days)</h4>
-            <div class="change-summary-grid">
-                ${changeStats.newLeads > 0 ? `<div class="change-stat positive"><i class="fas fa-plus-circle"></i> <strong>${changeStats.newLeads}</strong> new leads ($${formatCurrency(changeStats.valueAdded)})</div>` : ''}
-                ${changeStats.removedLeads > 0 ? `<div class="change-stat negative"><i class="fas fa-minus-circle"></i> <strong>${changeStats.removedLeads}</strong> removed leads ($${formatCurrency(changeStats.valueRemoved)})</div>` : ''}
-                ${changeStats.stageChanges > 0 ? `<div class="change-stat neutral"><i class="fas fa-exchange-alt"></i> <strong>${changeStats.stageChanges}</strong> leads moved from this stage</div>` : ''}
-            </div>
+        <div class="card" style="padding:12px;">
+          <h4 style="margin-bottom:8px;">Top Leads</h4>
+          <ol style="margin:0;padding-left:18px;">
+            ${leadsTop.map(l => `<li>${l.entity?.name || 'Lead'} — $${formatCurrency(l.value)} <span style="color:#64748b;">(w: $${formatCurrency(calculateLeadWeightedValue(l))})</span></li>`).join('')}
+          </ol>
         </div>
-        ` : ''}
-        <h4>Leads in this stage:</h4>
-        <div class="leads-list">
-            ${stageData.leads.map(lead => {
-                const urgencyColor = getContactUrgencyColor(lead.lastContact, lead);
-                const lastContactInfo = lead.lastContact ? 
-                    `<span class="last-contact" style="color: ${urgencyColor}; font-weight: bold;">Last Contact: ${formatLastContact(lead.lastContact)}</span>` :
-                    `<span class="last-contact" style="color: ${urgencyColor};">No contact info</span>`;
-                
-                const individualWeight = getIndividualLeadWeight(lead.id);
-                const weightedValue = calculateLeadWeightedValue(lead);
-                const weightDisplay = individualWeight !== 1 ? ` (${individualWeight}x)` : '';
-                
-                // Get change information for this lead
-                const leadChangeInfo = getLeadChangeInfo(lead.id);
-                const changeIndicator = leadChangeInfo.isNew ? 
-                    `<span class="change-badge new"><i class="fas fa-plus-circle"></i> New ${formatChangeDate(leadChangeInfo.changeDate)}</span>` :
-                    leadChangeInfo.isMoved ? 
-                    `<span class="change-badge moved"><i class="fas fa-exchange-alt"></i> Moved from ${leadChangeInfo.oldStage} ${formatChangeDate(leadChangeInfo.changeDate)}</span>` : '';
-                
-                return `
-                    <div class="lead-item ${leadChangeInfo.isNew || leadChangeInfo.isMoved ? 'has-changes' : ''}">
-                        <div class="lead-header">
-                            <strong>${lead.entity?.name || `Lead ${lead.id}`}${weightDisplay}</strong>
-                            ${changeIndicator}
-                        </div>
-                        <div class="lead-details">
-                            <span class="lead-value">$${formatCurrency(lead.value)}</span>
-                            <span class="lead-weighted-value">Weighted: $${formatCurrency(weightedValue)}</span>
-                            ${lead.source ? `<span class="lead-source">Source: ${lead.source}</span>` : ''}
-                            ${lead.contactDirection ? `<span class="lead-contact">Contact: ${lead.contactDirection} ${getContactDirection(lead) === 'inbound' ? '📥' : getContactDirection(lead) === 'outbound' ? '📤' : ''}</span>` : ''}
-                            ${lead.contactType ? `<span class="lead-type">Type: ${lead.contactType}</span>` : ''}
-                            ${lead.leadAge !== null ? `<span class="lead-age">Age: ${lead.leadAge} days</span>` : ''}
-                            ${lastContactInfo}
-                            <div class="lead-weight-controls">
-                                <button onclick="showLeadWeightModal('${lead.id}', '${lead.entity?.name || `Lead ${lead.id}`}', ${individualWeight})" class="btn-weight">
-                                    <i class="fas fa-sliders-h"></i> Adjust Weight
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('')}
-        </div>
+      </div>
+      <h4 style="margin:16px 0 8px;">All Leads</h4>
+      <div class="leads-list">
+        ${stageData.leads.map(lead => {
+            const urgencyColor = getContactUrgencyColor(lead.lastContact, lead);
+            const individualWeight = getIndividualLeadWeight(lead.id);
+            const weightedValue = calculateLeadWeightedValue(lead);
+            const lastContactInfo = lead.lastContact ? `<span class="last-contact" style="color:${urgencyColor};font-weight:bold;">Last Contact: ${formatLastContact(lead.lastContact)}</span>` : `<span class="last-contact" style="color:${urgencyColor};">No contact info</span>`;
+            return `<div class="lead-item"><div class="lead-header"><strong>${lead.entity?.name || `Lead ${lead.id}`}${individualWeight!==1?` (${individualWeight}x)`:''}</strong></div><div class="lead-details"><span class="lead-value">$${formatCurrency(lead.value)}</span><span class="lead-weighted-value">Weighted: $${formatCurrency(weightedValue)}</span>${lead.source?`<span class="lead-source">Source: ${lead.source}</span>`:''}${lastContactInfo}</div></div>`;
+        }).join('')}
+      </div>
     `;
-    
-    modal.classList.remove('hidden');
+
+    drawer.classList.remove('hidden');
 }
 
 // Show lead details
@@ -3253,7 +3223,9 @@ function updatePiggyBank() {
 
     // Pipeline coverage of remaining goal
     try {
-        const weighted = currentData?.leads?.reduce((sum, l) => sum + calculateLeadWeightedValue(l), 0) || 0;
+        // Only consider open (non-closed, non-lost) leads for pipeline coverage
+        const openLeads = (currentData?.leads || []).filter(l => l.stage !== defaultSettings.closedWonStage && !defaultSettings.lostStages.includes(l.stage));
+        const weighted = openLeads.reduce((sum, l) => sum + calculateLeadWeightedValue(l), 0) || 0;
         const remaining = Math.max(0, 100000000 - closedWonValue);
         const coveragePct = remaining > 0 ? Math.min(100, (weighted / remaining) * 100) : 100;
         const wpEl = document.getElementById('weightedPipeline_goal');
@@ -3292,8 +3264,14 @@ function updatePiggyBank() {
       case 'Weighted': return `$${formatCurrency(calculateLeadWeightedValue(lead)||0)}`;
       case 'Last Contact': return lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : '—';
       default:
-        const fv=(lead.field_values||[]).find(f=> (f.name||'').toLowerCase()===label.toLowerCase());
-        const raw=fv? (f.value && Object.prototype.hasOwnProperty.call(f.value,'data')?f.value.data:f.value):null;
+        // Match by field name via currentData.fields mapping
+        const fieldsMap = new Map((currentData?.fields||[]).map(f => [String(f.id), f.name]));
+        const match = (lead.field_values||[]).find(fv => {
+          const name = (fv.name || fieldsMap.get(String(fv.id)) || '').toLowerCase();
+          return name === label.toLowerCase();
+        });
+        if (!match) return '';
+        const raw = (match.value && Object.prototype.hasOwnProperty.call(match.value,'data')) ? match.value.data : match.value;
         return strVal(raw)||'';
     }
   }

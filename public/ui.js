@@ -164,4 +164,8 @@
   on(closeDrawerBtn, 'click', () => listDrawer?.classList.add('hidden'));
   on(qs('#cancelColumns'), 'click', () => listDrawer?.classList.add('hidden'));
   // Apply will be bound in app.js after options are populated
+
+  // Stage drawer close hooks
+  const stageDrawer = qs('#stageDrawer');
+  stageDrawer?.querySelectorAll('.close').forEach(btn => btn.addEventListener('click', () => stageDrawer.classList.add('hidden')));
 })();

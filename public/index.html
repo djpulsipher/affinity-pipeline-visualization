@@ -7,26 +7,360 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="styles.css" rel="stylesheet">
+    <meta name="theme-color" content="#2563eb">
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <h1><i class="fas fa-chart-line"></i> Affinity Pipeline Visualization</h1>
-            <div class="header-tools">
-                <div class="theme-toggle" title="Toggle light/dark theme">
-                    <input type="checkbox" id="themeSwitch" aria-label="Toggle dark mode">
-                    <label for="themeSwitch">
-                        <i class="fas fa-sun"></i>
-                        <span class="toggle-track"></span>
-                        <i class="fas fa-moon"></i>
-                    </label>
+    <div class="dashboard">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-mark">P</div>
+                <div class="brand-text">
+                    <span class="brand-name">Pipeline</span>
+                    <span class="brand-sub">Dashboard</span>
                 </div>
             </div>
-        </header>
+            <nav class="nav">
+                <a href="#dashboard" class="nav-item active"><i class="fas fa-gauge"></i> Dashboard</a>
+                <a href="#funnel" class="nav-item"><i class="fas fa-filter"></i> Funnel</a>
+                <a href="#stages" class="nav-item"><i class="fas fa-chart-bar"></i> Stage Breakdown</a>
+                <a href="#changes" class="nav-item"><i class="fas fa-history"></i> Changes</a>
+                <a href="#settings" id="openSettings" class="nav-item"><i class="fas fa-sliders-h"></i> Settings</a>
+            </nav>
+            <div class="sidebar-footer">
+                <a class="nav-item muted" href="#support"><i class="fas fa-circle-question"></i> Help Center</a>
+                <a class="nav-item muted" href="#feedback"><i class="fas fa-comment-dots"></i> Feedback</a>
+            </div>
+        </aside>
 
-        <!-- Configuration Panel -->
-        <div class="config-panel">
+        <div class="main-area">
+            <!-- Topbar -->
+            <header class="topbar">
+                <div class="page-title">
+                    <h1><i class="fas fa-chart-line"></i> Affinity Pipeline</h1>
+                    <p class="subtitle">Welcome back — here’s the latest.</p>
+                </div>
+                <div class="topbar-actions">
+                    <div class="search">
+                        <i class="fas fa-magnifying-glass"></i>
+                        <input type="search" placeholder="Search…" aria-label="Search">
+                    </div>
+                    <button id="toggleConfig" class="btn btn-outline"><i class="fas fa-sliders"></i> Config</button>
+                    <div class="theme-toggle" title="Toggle light/dark theme">
+                        <input type="checkbox" id="themeSwitch" aria-label="Toggle dark mode">
+                        <label for="themeSwitch">
+                            <i class="fas fa-sun"></i>
+                            <span class="toggle-track"></span>
+                            <i class="fas fa-moon"></i>
+                        </label>
+                    </div>
+                    <div class="avatar" title="Account">
+                        <img alt="avatar" src="https://www.gravatar.com/avatar?d=mp&s=64">
+                    </div>
+                </div>
+            </header>
+
+            <main class="content container">
+                <!-- Quick stats cards -->
+                <section id="dashboard" class="stats-row">
+                    <div class="card stat-card">
+                        <div class="stat-header">Total Value</div>
+                        <div class="stat-main" id="totalValue" aria-live="polite">$0</div>
+                        <div class="spark spark-1" aria-hidden="true"></div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-header">Total Leads</div>
+                        <div class="stat-main" id="totalLeads" aria-live="polite">0</div>
+                        <div class="spark spark-2" aria-hidden="true"></div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-header">Weighted Value</div>
+                        <div class="stat-main" id="weightedValue" aria-live="polite">$0</div>
+                        <div class="spark spark-3" aria-hidden="true"></div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-header">Avg Days Since Last Contact</div>
+                        <div class="stat-main small" id="averageContact" aria-live="polite">No contact data</div>
+                        <div class="spark spark-4" aria-hidden="true"></div>
+                    </div>
+                </section>
+
+                <!-- Configuration Panel (collapsible) -->
+                <section id="settings" class="config-panel card">
+                    <div class="config-section">
+                        <h3><i class="fas fa-cog"></i> Configuration</h3>
+                        <div class="form-group">
+                            <label for="listSelect">Select List:</label>
+                            <select id="listSelect" class="form-control">
+                                <option value="">Loading lists...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="stageField">Stage Field:</label>
+                            <select id="stageField" class="form-control">
+                                <option value="">Select stage field...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="valueField">Value Field:</label>
+                            <select id="valueField" class="form-control">
+                                <option value="">Select value field...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="sourceField">Source Field:</label>
+                            <select id="sourceField" class="form-control">
+                                <option value="">Select source field...</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="firstEmailField">First Email Field (for lead age):</label>
+                            <select id="firstEmailField" class="form-control">
+                                <option value="">Select first email field...</option>
+                            </select>
+                        </div>
+                        <button id="loadData" class="btn btn-primary">Load Pipeline Data</button>
+                    </div>
+
+                    <!-- Stage Weights -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-sliders-h"></i> Stage Weights</h3>
+                        <div class="stage-management">
+                            <div class="stage-controls">
+                                <button id="reorderStages" class="btn btn-secondary">
+                                    <i class="fas fa-sort"></i> Reorder Stages
+                                </button>
+                                <button id="resetWeights" class="btn btn-secondary">
+                                    <i class="fas fa-undo"></i> Reset Weights
+                                </button>
+                            </div>
+                            <div id="stageWeightsContainer">
+                                <!-- Stage weights will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Default Values Management -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-cog"></i> Default Values</h3>
+                        
+                        <!-- Default Stage -->
+                        <div class="default-stage-section">
+                            <div class="form-group">
+                                <label for="defaultStageField">Stage Field:</label>
+                                <select id="defaultStageField" class="form-control">
+                                    <option value="">Select stage field...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="defaultStageValue">Default Stage Value:</label>
+                                <select id="defaultStageValue" class="form-control">
+                                    <option value="">Select default stage value...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Default Value Rules -->
+                        <div class="default-rules">
+                            <h4>Default Value Rules</h4>
+                            <div id="defaultValueRules" class="rules-container">
+                                <!-- Dynamic rules will be added here -->
+                            </div>
+                            <button id="addRule" class="btn btn-outline">+ Add Rule</button>
+                        </div>
+
+                        <!-- Global Default Value -->
+                        <div class="form-group">
+                            <label for="globalDefaultValue">Global Default Value ($):</label>
+                            <input type="number" id="globalDefaultValue" class="form-control" placeholder="1000000" value="1000000">
+                        </div>
+                    </div>
+
+                    <!-- Closed/Won Management -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-trophy"></i> Closed/Won Management</h3>
+                        
+                        <!-- Closed/Won Configuration -->
+                        <div class="closed-won-section">
+                            <h4>Closed/Won Configuration</h4>
+                            <div class="form-group">
+                                <label for="closedWonStage">Closed/Won Stage Value:</label>
+                                <select id="closedWonStage" class="form-control">
+                                    <option value="">Select stage value...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="closedWonValueField">Value Field for Committed Amount:</label>
+                                <select id="closedWonValueField" class="form-control">
+                                    <option value="">Select value field...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Lost Stage Management -->
+                    <div class="config-section">
+                        <h3><i class="fas fa-times-circle"></i> Lost Stage Management</h3>
+                        <div class="closed-won-section">
+                            <h4>Lost Stage Configuration</h4>
+                            <div class="form-group">
+                                <label for="lostStages">Primary Lost Stage Value:</label>
+                                <select id="lostStages" class="form-control">
+                                    <option value="">Select stage value...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="additionalLostStages">Additional Lost Stage Values (Optional):</label>
+                                <div class="lost-stages-list" id="additionalLostStagesList">
+                                    <div class="lost-stage-item-template" style="display: none;">
+                                        <select class="form-control additional-lost-stage">
+                                            <option value="">Select additional stage...</option>
+                                        </select>
+                                        <button type="button" class="btn btn-sm btn-danger remove-lost-stage">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <button type="button" id="addLostStage" class="btn btn-outline btn-sm">
+                                    <i class="fas fa-plus"></i> Add Another Lost Stage
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Main Visualization Area -->
+                <section class="visualization-container card">
+                    <div class="controls">
+                        <div class="view-controls">
+                            <button id="toggleView" class="btn btn-outline">Toggle View</button>
+                            <button id="refreshData" class="btn btn-outline"><i class="fas fa-sync"></i> Refresh</button>
+                            <button id="debugMode" class="btn btn-outline"><i class="fas fa-bug"></i> Debug</button>
+                        </div>
+                        <div class="summary-stats hidden">
+                            <div class="stat">
+                                <span class="stat-label">Total Value:</span>
+                                <span id="totalValue_legacy" class="stat-value">$0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Total Leads:</span>
+                                <span id="totalLeads_legacy" class="stat-value">0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Weighted Value:</span>
+                                <span id="weightedValue_legacy" class="stat-value">$0</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Avg Days Since Last Contact:</span>
+                                <span id="averageContact_legacy" class="stat-value">No contact data</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Stage Metrics Table -->
+                    <div class="stage-metrics-container">
+                        <div id="stageAges" class="stage-metrics-content">
+                            <p>No stage data available</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Pipeline Visualization -->
+                    <div class="viz-grid">
+                        <!-- Funnel Chart (Main) -->
+                        <div class="funnel-section card" id="funnel">
+                            <h3><i class="fas fa-filter"></i> Sales Funnel</h3>
+                            <div id="funnelViz" class="funnel-viz">
+                                <div class="loading" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading funnel data...</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Bar Chart (Secondary) -->
+                        <div class="bar-section card" id="stages">
+                            <h3><i class="fas fa-chart-bar"></i> Stage Breakdown</h3>
+                            <div id="pipelineViz" class="pipeline-viz">
+                                <div class="loading" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading pipeline data...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Closed/Won Summary -->
+                <section class="closed-won-summary card">
+                    <div class="config-section">
+                        <h3><i class="fas fa-piggy-bank"></i> $100M Goal Tracker</h3>
+                        <div class="goal-tracker">
+                            <div class="goal-stats">
+                                <div class="stat">
+                                    <span class="stat-label">Closed/Won Value:</span>
+                                    <span id="closedWonValue" class="stat-value">$0</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Progress to Goal:</span>
+                                    <span id="goalProgress" class="stat-value">0%</span>
+                                </div>
+                            </div>
+                            <div id="piggyBank" class="piggy-bank">
+                                <!-- Piggy bank visualization will be added here -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Pipeline Change Tracking -->
+                <section class="pipeline-changes-section card" id="changes">
+                    <div class="section-header">
+                        <h3><i class="fas fa-history"></i> Pipeline Changes</h3>
+                        <div class="change-controls">
+                            <button id="refreshDataForTracking" class="btn btn-primary" onclick="refreshDataForTracking()">
+                                <i class="fas fa-sync-alt"></i> Refresh & Track
+                            </button>
+                            <button id="toggleAutoRefresh" class="btn btn-outline" onclick="toggleAutoRefresh()">
+                                <i class="fas fa-clock"></i> Auto Refresh
+                            </button>
+                            <button id="toggleChangeTracking" class="btn btn-warning" onclick="toggleChangeTracking()">
+                                Disable Tracking
+                            </button>
+                            <button id="clearChangeHistory" class="btn btn-outline" onclick="clearChangeHistory()">
+                                <i class="fas fa-trash"></i> Clear History
+                            </button>
+                            <button id="clearStorage" class="btn btn-outline" onclick="clearStorage()" title="Clear localStorage if experiencing storage issues">
+                                <i class="fas fa-database"></i> Clear Storage
+                            </button>
+                            <button id="searchHistoricalChanges" class="btn btn-outline" onclick="showHistoricalSearchModal()">
+                                <i class="fas fa-search"></i> Search History
+                            </button>
+                        </div>
+                    </div>
+                    <div id="changeHistoryContainer" class="change-history">
+                        <div class="no-changes">No pipeline changes recorded yet.</div>
+                    </div>
+                </section>
+
+                <!-- Detailed View -->
+                <section id="detailedView" class="detailed-view card hidden">
+                    <h3>Lead Details</h3>
+                    <div id="leadDetails" class="lead-details">
+                        <!-- Lead details will be populated here -->
+                    </div>
+                </section>
+
+                <!-- Legend -->
+                <section class="legend card">
+                    <h4>Legend</h4>
+                    <div id="legendItems" class="legend-items">
+                        <!-- Legend items will be dynamically generated -->
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
             <div class="config-section">
                 <h3><i class="fas fa-cog"></i> Configuration</h3>
                 <div class="form-group">
@@ -431,5 +765,6 @@
 
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="app.js"></script>
+    <script src="ui.js"></script>
 </body>
 </html> 

@@ -39,6 +39,25 @@ let defaultSettings = {
 // New field mappings for lead age
 let firstEmailField = null;
 
+// Robust numeric parser for currency/number strings (handles $ and commas)
+function parseCurrencyNumber(input) {
+    if (input == null) return 0;
+    if (typeof input === 'number') return isFinite(input) ? input : 0;
+    if (typeof input === 'string') {
+        // Remove currency symbols, commas, spaces; keep digits, minus, and decimal point
+        const cleaned = input.replace(/[^0-9.\-]/g, '');
+        const n = parseFloat(cleaned);
+        return isNaN(n) ? 0 : n;
+    }
+    if (typeof input === 'object') {
+        // Common shapes: { amount }, { data }, { text }
+        if ('amount' in input) return parseCurrencyNumber(input.amount);
+        if ('data' in input) return parseCurrencyNumber(input.data);
+        if ('text' in input) return parseCurrencyNumber(input.text);
+    }
+    return 0;
+}
+
 // Juvo Blue Color Scheme
 const colorSchemes = {
     sources: d3.scaleOrdinal(d3.schemeCategory10),
@@ -711,7 +730,7 @@ function processPipelineData(data) {
             if (fieldId == fieldMappings.stage) {
                 leadData.stage = fieldValueData;
             } else if (fieldId == fieldMappings.value) {
-                leadData.value = parseFloat(fieldValueData) || 0;
+                leadData.value = parseCurrencyNumber(fieldValueData);
             } else if (fieldId == fieldMappings.source) {
                 // Handle source field specifically - if it's null or empty object, set to empty string
                 if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
@@ -3002,9 +3021,9 @@ async function processPipelineDataWithDefaults(data) {
                         if (field && field.name === defaultSettings.closedWonValueField) {
                             let closedWonValue = 0;
                             if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
-                                closedWonValue = parseFloat(fieldValue.value.data) || 0;
+                                closedWonValue = parseCurrencyNumber(fieldValue.value.data);
                             } else {
-                                closedWonValue = parseFloat(fieldValue.value) || 0;
+                                closedWonValue = parseCurrencyNumber(fieldValue.value);
                             }
                             if (closedWonValue > 0) {
                                 leadData.value = closedWonValue;
@@ -3144,17 +3163,7 @@ function updatePiggyBank() {
 
         // If still zero and a field was selected, try extracting directly from field_values (robustly)
         if (closedWonValue === 0 && defaultSettings.closedWonValueField) {
-            const toNumber = (val) => {
-                if (val == null) return 0;
-                if (typeof val === 'number') return val;
-                if (typeof val === 'string') {
-                    // strip currency and thousands separators
-                    const cleaned = val.replace(/[$,\s]/g, '');
-                    const num = parseFloat(cleaned);
-                    return isNaN(num) ? 0 : num;
-                }
-                return 0;
-            };
+            const toNumber = (val) => parseCurrencyNumber(val);
 
             const getFieldNameById = (id) => {
                 const field = currentData.fields?.find(f => String(f.id) === String(id));

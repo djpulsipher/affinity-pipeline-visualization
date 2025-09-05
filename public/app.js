@@ -58,6 +58,12 @@ function parseCurrencyNumber(input) {
     return 0;
 }
 
+// Normalize field IDs from various API shapes (e.g., "field-123", 123, string IDs)
+function normalizeFieldId(raw) {
+    const id = raw || '';
+    return String(id).replace(/^field-/, '');
+}
+
 // Juvo Blue Color Scheme
 const colorSchemes = {
     sources: d3.scaleOrdinal(d3.schemeCategory10),
@@ -727,11 +733,16 @@ function processPipelineData(data) {
                 fieldValueData = '';
             }
             
-            if (fieldId == fieldMappings.stage) {
+            const normId = normalizeFieldId(fieldId);
+            const mapStage = normalizeFieldId(fieldMappings.stage);
+            const mapValue = normalizeFieldId(fieldMappings.value);
+            const mapSource = normalizeFieldId(fieldMappings.source);
+
+            if (normId === mapStage) {
                 leadData.stage = fieldValueData;
-            } else if (fieldId == fieldMappings.value) {
+            } else if (normId === mapValue) {
                 leadData.value = parseCurrencyNumber(fieldValueData);
-            } else if (fieldId == fieldMappings.source) {
+            } else if (normId === mapSource) {
                 // Handle source field specifically - if it's null or empty object, set to empty string
                 if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
                     leadData.source = '';
@@ -2974,10 +2985,7 @@ async function processPipelineDataWithDefaults(data) {
         // Apply default stage if missing
         if (!leadData.stage && defaultSettings.defaultStageField && defaultSettings.defaultStageValue) {
             // Check if this lead has the default stage field but no value
-            const hasStageField = fieldValues.some(fv => {
-                const fieldId = fv.id;
-                return fieldId == defaultSettings.defaultStageField;
-            });
+            const hasStageField = fieldValues.some(fv => normalizeFieldId(fv.id) === normalizeFieldId(defaultSettings.defaultStageField));
             if (hasStageField) {
                 leadData.stage = defaultSettings.defaultStageValue;
             }
@@ -3274,9 +3282,9 @@ function updatePiggyBank() {
       case 'Last Contact': return lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : '—';
       default:
         // Match by field name via currentData.fields mapping
-        const fieldsMap = new Map((currentData?.fields||[]).map(f => [String(f.id), f.name]));
+        const fieldsMap = new Map((currentData?.fields||[]).map(f => [normalizeFieldId(f.id), f.name]));
         const match = (lead.field_values||[]).find(fv => {
-          const name = (fv.name || fieldsMap.get(String(fv.id)) || '').toLowerCase();
+          const name = (fv.name || fieldsMap.get(normalizeFieldId(fv.id)) || '').toLowerCase();
           return name === label.toLowerCase();
         });
         if (!match) return '';

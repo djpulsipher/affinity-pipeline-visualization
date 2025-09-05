@@ -2873,85 +2873,53 @@ async function processPipelineDataWithDefaults(data) {
             lastContact: null // New field for last contact information
         };
         
-        // Extract field values from the new API structure
-        fieldValues.forEach(fieldValue => {
-            const fieldId = fieldValue.id;
-            
-            // Handle different value types from the new API structure
-            let fieldValueData = null;
-            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
-                // New API structure: value.data contains the actual value
-                if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
-                    fieldValueData = fieldValue.value.data?.text;
-                } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
-                    fieldValueData = fieldValue.value.data;
-                } else if (fieldValue.value.type === 'text') {
-                    fieldValueData = fieldValue.value.data;
-                } else if (fieldValue.value.type === 'dropdown-multi') {
-                    // Handle multi-select dropdowns - convert array to readable string
-                    const data = fieldValue.value.data;
-                    if (Array.isArray(data)) {
-                        fieldValueData = data.join(', ');
-                    } else if (data && typeof data === 'object') {
-                        // If it's an object with text properties, extract them
-                        const texts = Object.values(data).filter(val => typeof val === 'string');
-                        fieldValueData = texts.join(', ');
-                    } else if (data != null) {
-                        fieldValueData = String(data);
-                    } else {
-                        fieldValueData = '';
-                    }
-                } else if (fieldValue.value.type === 'interaction') {
-                    // For relationship-intelligence fields, get the date
-                    if (fieldValue.value.data?.sentAt) {
-                        fieldValueData = fieldValue.value.data.sentAt;
-                    } else if (fieldValue.value.data?.startTime) {
-                        fieldValueData = fieldValue.value.data.startTime;
-                    }
+        // Build normalized maps and then assign stage/value/source reliably
+        const idToValue = new Map();
+        const nameToValue = new Map();
+        const getFieldNameById = (id) => (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(id))?.name || '';
+        fieldValues.forEach(fv => {
+            const idNorm = normalizeFieldId(fv.id || fv.field_id || fv.entityAttributeId);
+            const nameLower = (fv.name || getFieldNameById(idNorm)).toLowerCase();
+            let raw = null;
+            const v = fv.value;
+            if (v && Object.prototype.hasOwnProperty.call(v, 'data')) {
+                switch (v.type) {
+                    case 'number': raw = v.data; break;
+                    case 'number-multi': raw = Array.isArray(v.data) ? v.data[0] : v.data; break;
+                    case 'ranked-dropdown':
+                    case 'dropdown': raw = v.data?.text ?? v.data; break;
+                    case 'dropdown-multi': raw = Array.isArray(v.data) ? v.data.join(', ') : v.data; break;
+                    case 'text': raw = v.data; break;
+                    case 'interaction': raw = v.data?.sentAt || v.data?.startTime || null; break;
+                    default: raw = v.data;
                 }
             } else {
-                // Fallback to old structure
-                fieldValueData = fieldValue.value?.text || fieldValue.value;
+                raw = fv.value?.text ?? fv.value ?? null;
             }
-            
-            // Ensure fieldValueData is always a string for display
-            if (typeof fieldValueData === 'object') {
-                fieldValueData = JSON.stringify(fieldValueData);
-            } else if (fieldValueData !== null && fieldValueData !== undefined) {
-                fieldValueData = String(fieldValueData);
-            } else {
-                fieldValueData = '';
-            }
-            
-            const mapStage = normalizeFieldId(fieldMappings.stage);
-            const mapValue = normalizeFieldId(fieldMappings.value);
-            const mapSource = normalizeFieldId(fieldMappings.source);
-
-            if (fieldId === mapStage) {
-                leadData.stage = fieldValueData;
-            } else if (fieldId === mapValue) {
-                leadData.value = parseCurrencyNumber(fieldValueData);
-            } else if (fieldId === mapSource) {
-                // Handle source field specifically - if it's null or empty object, set to empty string
-                if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
-                    leadData.source = '';
-                } else {
-                    leadData.source = fieldValueData;
-                }
-                console.log('Source field processed (with defaults):', fieldId, fieldValueData, typeof fieldValueData);
-            } else if (fieldId === normalizeFieldId(firstEmailField)) {
-                leadData.firstEmail = fieldValueData;
-                // Calculate lead age from first email date
-                if (fieldValueData) {
-                    const firstEmailDate = new Date(fieldValueData);
-                    if (!isNaN(firstEmailDate.getTime())) {
-                        const now = new Date();
-                        const ageInDays = Math.floor((now - firstEmailDate) / (1000 * 60 * 60 * 24));
-                        leadData.leadAge = ageInDays;
-                    }
-                }
-            }
+            idToValue.set(idNorm, raw);
+            if (nameLower) nameToValue.set(nameLower, raw);
         });
+
+        const stageFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.stage))?.name?.toLowerCase() || '';
+        const valueFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.value))?.name?.toLowerCase() || '';
+        const sourceFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.source))?.name?.toLowerCase() || '';
+
+        const stageRaw = idToValue.get(normalizeFieldId(fieldMappings.stage)) ?? nameToValue.get(stageFieldName);
+        const valueRaw = idToValue.get(normalizeFieldId(fieldMappings.value)) ?? nameToValue.get(valueFieldName);
+        const sourceRaw = idToValue.get(normalizeFieldId(fieldMappings.source)) ?? nameToValue.get(sourceFieldName);
+        const firstEmailRaw = idToValue.get(normalizeFieldId(firstEmailField));
+
+        if (stageRaw != null) leadData.stage = String(stageRaw);
+        if (valueRaw != null) leadData.value = parseCurrencyNumber(valueRaw);
+        if (sourceRaw != null) leadData.source = String(sourceRaw);
+        if (firstEmailRaw) {
+            leadData.firstEmail = String(firstEmailRaw);
+            const firstEmailDate = new Date(leadData.firstEmail);
+            if (!isNaN(firstEmailDate.getTime())) {
+                const now = new Date();
+                leadData.leadAge = Math.floor((now - firstEmailDate) / (1000 * 60 * 60 * 24));
+            }
+        }
         
 
         // Extract Last Contact and Contact Direction from relationship-intelligence fields

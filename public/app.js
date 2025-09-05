@@ -675,7 +675,7 @@ function processPipelineData(data) {
         
         // Extract field values from the new API structure
         fieldValues.forEach(fieldValue => {
-            const fieldId = fieldValue.id;
+            const fieldId = normalizeFieldId(fieldValue.id || fieldValue.field_id || fieldValue.entityAttributeId);
             
             // Handle different value types from the new API structure
             let fieldValueData = null;
@@ -2923,11 +2923,15 @@ async function processPipelineDataWithDefaults(data) {
                 fieldValueData = '';
             }
             
-            if (fieldId == fieldMappings.stage) {
+            const mapStage = normalizeFieldId(fieldMappings.stage);
+            const mapValue = normalizeFieldId(fieldMappings.value);
+            const mapSource = normalizeFieldId(fieldMappings.source);
+
+            if (fieldId === mapStage) {
                 leadData.stage = fieldValueData;
-            } else if (fieldId == fieldMappings.value) {
-                leadData.value = parseFloat(fieldValueData) || 0;
-            } else if (fieldId == fieldMappings.source) {
+            } else if (fieldId === mapValue) {
+                leadData.value = parseCurrencyNumber(fieldValueData);
+            } else if (fieldId === mapSource) {
                 // Handle source field specifically - if it's null or empty object, set to empty string
                 if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
                     leadData.source = '';
@@ -2935,7 +2939,7 @@ async function processPipelineDataWithDefaults(data) {
                     leadData.source = fieldValueData;
                 }
                 console.log('Source field processed (with defaults):', fieldId, fieldValueData, typeof fieldValueData);
-            } else if (fieldId == firstEmailField) {
+            } else if (fieldId === normalizeFieldId(firstEmailField)) {
                 leadData.firstEmail = fieldValueData;
                 // Calculate lead age from first email date
                 if (fieldValueData) {

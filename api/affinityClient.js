@@ -14,4 +14,14 @@ async function makeAffinityRequest(endpoint, params = {}) {
   return response.data;
 }
 
-module.exports = { makeAffinityRequest };
+// Returns full Axios response (including headers) for endpoints that paginate via headers
+async function makeAffinityRequestRaw(endpoint, params = {}) {
+  return axios.get(`${AFFINITY_BASE_URL}${endpoint}`, {
+    headers: {
+      Authorization: `Bearer ${AFFINITY_API_KEY}`
+    },
+    params
+  });
+}
+
+module.exports = { makeAffinityRequest, makeAffinityRequestRaw };

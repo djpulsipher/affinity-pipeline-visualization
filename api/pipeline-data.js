@@ -11,20 +11,37 @@ module.exports = async (req, res) => {
     const fields = fieldsResponse.data || fieldsResponse;
     const fieldIds = fields.map(f => f.id);
 
-    let listEntriesResponse;
-    try {
-      listEntriesResponse = await makeAffinityRequest(`/v2/lists/${listId}/list-entries`, {
-        fieldIds: fieldIds.join(',')
-      });
-    } catch (err) {
-      listEntriesResponse = await makeAffinityRequest(`/v2/lists/${listId}/list-entries`, {
-        fieldTypes: ['enriched', 'list', 'global', 'relationship-intelligence'].join(',')
-      });
+    // Fetch all list entries with pagination (Affinity defaults to ~100 per page)
+    async function fetchAllEntries() {
+      const all = [];
+      let pageToken;
+      let useFieldIds = true;
+      while (true) {
+        let params = { page_size: 500 };
+        if (pageToken) params.page_token = pageToken;
+        if (useFieldIds) params.fieldIds = fieldIds.join(',');
+        else params.fieldTypes = ['enriched', 'list', 'global', 'relationship-intelligence'].join(',');
+
+        let resp;
+        try {
+          resp = await makeAffinityRequest(`/v2/lists/${listId}/list-entries`, params);
+        } catch (err) {
+          // Fall back to fieldTypes if fieldIds are not accepted
+          if (useFieldIds) {
+            useFieldIds = false;
+            continue;
+          }
+          throw err;
+        }
+        const data = Array.isArray(resp) ? resp : (resp.data || resp.list_entries || []);
+        all.push(...data);
+        pageToken = resp?.next_page_token || resp?.nextPageToken || resp?.page_token || null;
+        if (!pageToken || data.length === 0) break;
+      }
+      return all;
     }
 
-    const entries = Array.isArray(listEntriesResponse)
-      ? listEntriesResponse
-      : (listEntriesResponse.data || listEntriesResponse.list_entries || []);
+    const entries = await fetchAllEntries();
 
     const pipelineData = entries.map(entry => {
       const fieldValues = entry.field_values || entry.fields || entry.entity?.fields || [];

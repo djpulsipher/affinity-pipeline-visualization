@@ -1,4 +1,4 @@
-const { makeAffinityRequest } = require('./affinityClient');
+const { makeAffinityRequest, makeAffinityRequestRaw } = require('./affinityClient');
 
 module.exports = async (req, res) => {
   const { listId } = req.query;
@@ -24,7 +24,8 @@ module.exports = async (req, res) => {
 
         let resp;
         try {
-          resp = await makeAffinityRequest(`/v2/lists/${listId}/list-entries`, params);
+          // Use RAW response so we can read pagination headers
+          resp = await makeAffinityRequestRaw(`/v2/lists/${listId}/list-entries`, params);
         } catch (err) {
           // Fall back to fieldTypes if fieldIds are not accepted
           if (useFieldIds) {
@@ -33,10 +34,14 @@ module.exports = async (req, res) => {
           }
           throw err;
         }
-        const data = Array.isArray(resp) ? resp : (resp.data || resp.list_entries || []);
+        const body = resp.data;
+        const data = Array.isArray(body) ? body : (body.data || body.list_entries || []);
         all.push(...data);
-        pageToken = resp?.next_page_token || resp?.nextPageToken || resp?.page_token || null;
-        if (!pageToken || data.length === 0) break;
+        // Pagination token can appear in headers or body depending on endpoint/version
+        const h = resp.headers || {};
+        pageToken = h['next-page-token'] || h['x-next-page-token'] || body?.next_page_token || body?.nextPageToken || null;
+        // If no token provided, stop when fewer than requested returned
+        if (!pageToken || data.length < (params.page_size || 100)) break;
       }
       return all;
     }

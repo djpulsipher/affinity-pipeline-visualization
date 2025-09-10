@@ -6,12 +6,17 @@ const AFFINITY_BASE_URL = 'https://api.affinity.co';
 
 async function makeAffinityRequest(endpoint, params = {}) {
   const response = await axios.get(`${AFFINITY_BASE_URL}${endpoint}`, {
-    headers: {
-      Authorization: `Bearer ${AFFINITY_API_KEY}`
-    },
+    headers: { Authorization: `Bearer ${AFFINITY_API_KEY}` },
     params
   });
   return response.data;
 }
 
-module.exports = { makeAffinityRequest };
+async function makeAffinityRequestRaw(endpoint, params = {}) {
+  return axios.get(`${AFFINITY_BASE_URL}${endpoint}`, {
+    headers: { Authorization: `Bearer ${AFFINITY_API_KEY}` },
+    params
+  });
+}
+
+module.exports = { makeAffinityRequest, makeAffinityRequestRaw };

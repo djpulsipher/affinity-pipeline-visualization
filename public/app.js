@@ -39,6 +39,31 @@ let defaultSettings = {
 // New field mappings for lead age
 let firstEmailField = null;
 
+// Robust numeric parser for currency/number strings (handles $ and commas)
+function parseCurrencyNumber(input) {
+    if (input == null) return 0;
+    if (typeof input === 'number') return isFinite(input) ? input : 0;
+    if (typeof input === 'string') {
+        // Remove currency symbols, commas, spaces; keep digits, minus, and decimal point
+        const cleaned = input.replace(/[^0-9.\-]/g, '');
+        const n = parseFloat(cleaned);
+        return isNaN(n) ? 0 : n;
+    }
+    if (typeof input === 'object') {
+        // Common shapes: { amount }, { data }, { text }
+        if ('amount' in input) return parseCurrencyNumber(input.amount);
+        if ('data' in input) return parseCurrencyNumber(input.data);
+        if ('text' in input) return parseCurrencyNumber(input.text);
+    }
+    return 0;
+}
+
+// Normalize field IDs from various API shapes (e.g., "field-123", 123, string IDs)
+function normalizeFieldId(raw) {
+    const id = raw || '';
+    return String(id).replace(/^field-/, '');
+}
+
 // Juvo Blue Color Scheme
 const colorSchemes = {
     sources: d3.scaleOrdinal(d3.schemeCategory10),
@@ -73,9 +98,25 @@ const TEAM_MEMBERS = [
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
+    // Attach renderer for UI router
+    window.renderListView = renderListView;
 });
 
 function initializeApp() {
+    // Initialize theme from saved preference
+    try {
+        const savedTheme = localStorage.getItem('ui:theme') || 'light';
+        setTheme(savedTheme);
+        const switchEl = document.getElementById('themeSwitch');
+        if (switchEl) {
+            switchEl.checked = (savedTheme === 'dark');
+            switchEl.addEventListener('change', () => {
+                const next = switchEl.checked ? 'dark' : 'light';
+                setTheme(next);
+                try { localStorage.setItem('ui:theme', next); } catch (_) {}
+            });
+        }
+    } catch (_) { /* ignore theme init errors */ }
     // Warn if we're on a Vercel preview URL (localStorage tied to subdomain)
     try {
         const host = window.location.hostname || '';
@@ -216,6 +257,16 @@ function initializeApp() {
             }
         }
     } catch (_) { /* ignore */ }
+}
+
+// Theme helper
+function setTheme(mode) {
+    const root = document.documentElement;
+    if (mode === 'dark') {
+        root.setAttribute('data-theme', 'dark');
+    } else {
+        root.setAttribute('data-theme', 'light');
+    }
 }
 
 // Helpers for persisting per-list stage configuration
@@ -624,7 +675,7 @@ function processPipelineData(data) {
         
         // Extract field values from the new API structure
         fieldValues.forEach(fieldValue => {
-            const fieldId = fieldValue.id;
+            const fieldId = normalizeFieldId(fieldValue.id || fieldValue.field_id || fieldValue.entityAttributeId);
             
             // Handle different value types from the new API structure
             let fieldValueData = null;
@@ -682,11 +733,16 @@ function processPipelineData(data) {
                 fieldValueData = '';
             }
             
-            if (fieldId == fieldMappings.stage) {
+            const normId = normalizeFieldId(fieldId);
+            const mapStage = normalizeFieldId(fieldMappings.stage);
+            const mapValue = normalizeFieldId(fieldMappings.value);
+            const mapSource = normalizeFieldId(fieldMappings.source);
+
+            if (normId === mapStage) {
                 leadData.stage = fieldValueData;
-            } else if (fieldId == fieldMappings.value) {
-                leadData.value = parseFloat(fieldValueData) || 0;
-            } else if (fieldId == fieldMappings.source) {
+            } else if (normId === mapValue) {
+                leadData.value = parseCurrencyNumber(fieldValueData);
+            } else if (normId === mapSource) {
                 // Handle source field specifically - if it's null or empty object, set to empty string
                 if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
                     leadData.source = '';
@@ -1592,6 +1648,51 @@ function updateSummaryStats() {
     }
 }
 
+// Render List View table from currentData
+async function renderListView() {
+    const head = document.getElementById('listTableHead');
+    const body = document.getElementById('listTableBody');
+    if (!head || !body) return;
+
+    const listId = document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+    if (!listId) {
+        head.innerHTML = '';
+        body.innerHTML = '<tr><td>Select a list in Settings to view entries.</td></tr>';
+        return;
+    }
+
+    if (!currentData || !currentData.leads || currentData.leads.length === 0) {
+        try { await loadPipelineData(); } catch (_) {}
+    }
+
+    const rows = (currentData?.leads || []).map(lead => ({
+        name: lead.entity?.name || `Lead ${lead.id}`,
+        stage: lead.stage || '-',
+        value: Number(lead.value) || 0,
+        weighted: calculateLeadWeightedValue(lead) || 0,
+        lastContact: lead.lastContact ? new Date(lead.lastContact) : null,
+    }));
+
+    head.innerHTML = ['Name','Stage','Value','Weighted','Last Contact'].map(h => `<th>${h}</th>`).join('');
+    const fmtDate = (d) => d ? d.toLocaleDateString() : '—';
+    if (rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="5">No entries found for this list.</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.name}</td>
+          <td><span class="badge">${r.stage}</span></td>
+          <td>$${formatCurrency(r.value)}</td>
+          <td>$${formatCurrency(r.weighted)}</td>
+          <td>${fmtDate(r.lastContact)}</td>
+        </tr>
+    `).join('');
+}
+
+// Expose for UI router
+window.renderListView = renderListView;
+
 // Create legend
 function createLegend() {
     const legendContainer = document.getElementById('legendItems');
@@ -1630,8 +1731,9 @@ function createLegend() {
 
 // Show stage details
 function showStageDetails(stageData) {
-    const modal = document.getElementById('leadModal');
-    const content = document.getElementById('modalContent');
+    const drawer = document.getElementById('stageDrawer');
+    const title = document.getElementById('stageDrawerTitle');
+    const body = document.getElementById('stageDrawerBody');
     
     // Calculate average last contact time for this stage
     const averageContactDays = calculateAverageContactDays(stageData.leads);
@@ -1642,73 +1744,42 @@ function showStageDetails(stageData) {
     // Get change statistics for this stage
     const changeStats = getStageChangeStats(stageData.stage);
     
-    content.innerHTML = `
-        <h3>${stageData.stage} Stage</h3>
-        <div class="stage-stats">
-            <p><strong>Total Value:</strong> $${formatCurrency(stageData.totalValue)}</p>
-            <p><strong>Weighted Value:</strong> $${formatCurrency(stageData.weightedValue)}</p>
-            <p><strong>Number of Leads:</strong> ${stageData.count}</p>
-            <p><strong>Stage Weight:</strong> ${stageWeights[stageData.stage] || 1}x</p>
-            ${averageContactDays !== null ? `<p><strong>Average Days Since Last Contact:</strong> <span style="color: ${getContactUrgencyColor(averageContactDays + ' days ago')};">${averageContactDays} days</span></p>` : ''}
-            ${averageLeadAge !== null ? `<p><strong>Average Lead Age:</strong> ${averageLeadAge} days</p>` : ''}
+    title.innerHTML = `<i class="fas fa-layer-group"></i> ${stageData.stage}`;
+    const kpi = (label, value) => `<div style="display:flex;flex-direction:column;gap:4px;"><span class="stat-label">${label}</span><span class="stat-value">${value}</span></div>`;
+    const leadsTop = stageData.leads.slice().sort((a,b)=> (b.value)-(a.value)).slice(0,5);
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin-bottom:16px;">
+        ${kpi('Total Value', `$${formatCurrency(stageData.totalValue)}`)}
+        ${kpi('Weighted', `$${formatCurrency(stageData.weightedValue)}`)}
+        ${kpi('Leads', `${stageData.count}`)}
+        ${kpi('Stage Weight', `${stageWeights[stageData.stage] || 1}x`)}
+      </div>
+      <div style="display:grid;grid-template-columns: 1fr 1fr; gap:16px;">
+        <div class="card" style="padding:12px;">
+          <h4 style="margin-bottom:8px;">Activity</h4>
+          <div>${averageLeadAge !== null ? `Avg Age: <strong>${averageLeadAge} days</strong>` : 'Avg Age: —'}</div>
+          <div>${averageContactDays !== null ? `Avg Last Contact: <strong>${averageContactDays} days</strong>` : 'Avg Last Contact: —'}</div>
         </div>
-        
-        ${changeStats.hasChanges ? `
-        <div class="stage-changes">
-            <h4><i class="fas fa-history"></i> Recent Changes (Past 7 Days)</h4>
-            <div class="change-summary-grid">
-                ${changeStats.newLeads > 0 ? `<div class="change-stat positive"><i class="fas fa-plus-circle"></i> <strong>${changeStats.newLeads}</strong> new leads ($${formatCurrency(changeStats.valueAdded)})</div>` : ''}
-                ${changeStats.removedLeads > 0 ? `<div class="change-stat negative"><i class="fas fa-minus-circle"></i> <strong>${changeStats.removedLeads}</strong> removed leads ($${formatCurrency(changeStats.valueRemoved)})</div>` : ''}
-                ${changeStats.stageChanges > 0 ? `<div class="change-stat neutral"><i class="fas fa-exchange-alt"></i> <strong>${changeStats.stageChanges}</strong> leads moved from this stage</div>` : ''}
-            </div>
+        <div class="card" style="padding:12px;">
+          <h4 style="margin-bottom:8px;">Top Leads</h4>
+          <ol style="margin:0;padding-left:18px;">
+            ${leadsTop.map(l => `<li>${l.entity?.name || 'Lead'} — $${formatCurrency(l.value)} <span style="color:#64748b;">(w: $${formatCurrency(calculateLeadWeightedValue(l))})</span></li>`).join('')}
+          </ol>
         </div>
-        ` : ''}
-        <h4>Leads in this stage:</h4>
-        <div class="leads-list">
-            ${stageData.leads.map(lead => {
-                const urgencyColor = getContactUrgencyColor(lead.lastContact, lead);
-                const lastContactInfo = lead.lastContact ? 
-                    `<span class="last-contact" style="color: ${urgencyColor}; font-weight: bold;">Last Contact: ${formatLastContact(lead.lastContact)}</span>` :
-                    `<span class="last-contact" style="color: ${urgencyColor};">No contact info</span>`;
-                
-                const individualWeight = getIndividualLeadWeight(lead.id);
-                const weightedValue = calculateLeadWeightedValue(lead);
-                const weightDisplay = individualWeight !== 1 ? ` (${individualWeight}x)` : '';
-                
-                // Get change information for this lead
-                const leadChangeInfo = getLeadChangeInfo(lead.id);
-                const changeIndicator = leadChangeInfo.isNew ? 
-                    `<span class="change-badge new"><i class="fas fa-plus-circle"></i> New ${formatChangeDate(leadChangeInfo.changeDate)}</span>` :
-                    leadChangeInfo.isMoved ? 
-                    `<span class="change-badge moved"><i class="fas fa-exchange-alt"></i> Moved from ${leadChangeInfo.oldStage} ${formatChangeDate(leadChangeInfo.changeDate)}</span>` : '';
-                
-                return `
-                    <div class="lead-item ${leadChangeInfo.isNew || leadChangeInfo.isMoved ? 'has-changes' : ''}">
-                        <div class="lead-header">
-                            <strong>${lead.entity?.name || `Lead ${lead.id}`}${weightDisplay}</strong>
-                            ${changeIndicator}
-                        </div>
-                        <div class="lead-details">
-                            <span class="lead-value">$${formatCurrency(lead.value)}</span>
-                            <span class="lead-weighted-value">Weighted: $${formatCurrency(weightedValue)}</span>
-                            ${lead.source ? `<span class="lead-source">Source: ${lead.source}</span>` : ''}
-                            ${lead.contactDirection ? `<span class="lead-contact">Contact: ${lead.contactDirection} ${getContactDirection(lead) === 'inbound' ? '📥' : getContactDirection(lead) === 'outbound' ? '📤' : ''}</span>` : ''}
-                            ${lead.contactType ? `<span class="lead-type">Type: ${lead.contactType}</span>` : ''}
-                            ${lead.leadAge !== null ? `<span class="lead-age">Age: ${lead.leadAge} days</span>` : ''}
-                            ${lastContactInfo}
-                            <div class="lead-weight-controls">
-                                <button onclick="showLeadWeightModal('${lead.id}', '${lead.entity?.name || `Lead ${lead.id}`}', ${individualWeight})" class="btn-weight">
-                                    <i class="fas fa-sliders-h"></i> Adjust Weight
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('')}
-        </div>
+      </div>
+      <h4 style="margin:16px 0 8px;">All Leads</h4>
+      <div class="leads-list">
+        ${stageData.leads.map(lead => {
+            const urgencyColor = getContactUrgencyColor(lead.lastContact, lead);
+            const individualWeight = getIndividualLeadWeight(lead.id);
+            const weightedValue = calculateLeadWeightedValue(lead);
+            const lastContactInfo = lead.lastContact ? `<span class="last-contact" style="color:${urgencyColor};font-weight:bold;">Last Contact: ${formatLastContact(lead.lastContact)}</span>` : `<span class="last-contact" style="color:${urgencyColor};">No contact info</span>`;
+            return `<div class="lead-item"><div class="lead-header"><strong>${lead.entity?.name || `Lead ${lead.id}`}${individualWeight!==1?` (${individualWeight}x)`:''}</strong></div><div class="lead-details"><span class="lead-value">$${formatCurrency(lead.value)}</span><span class="lead-weighted-value">Weighted: $${formatCurrency(weightedValue)}</span>${lead.source?`<span class="lead-source">Source: ${lead.source}</span>`:''}${lastContactInfo}</div></div>`;
+        }).join('')}
+      </div>
     `;
-    
-    modal.classList.remove('hidden');
+
+    drawer.classList.remove('hidden');
 }
 
 // Show lead details
@@ -2802,81 +2873,53 @@ async function processPipelineDataWithDefaults(data) {
             lastContact: null // New field for last contact information
         };
         
-        // Extract field values from the new API structure
-        fieldValues.forEach(fieldValue => {
-            const fieldId = fieldValue.id;
-            
-            // Handle different value types from the new API structure
-            let fieldValueData = null;
-            if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
-                // New API structure: value.data contains the actual value
-                if (fieldValue.value.type === 'ranked-dropdown' || fieldValue.value.type === 'dropdown') {
-                    fieldValueData = fieldValue.value.data?.text;
-                } else if (fieldValue.value.type === 'number' || fieldValue.value.type === 'number-multi') {
-                    fieldValueData = fieldValue.value.data;
-                } else if (fieldValue.value.type === 'text') {
-                    fieldValueData = fieldValue.value.data;
-                } else if (fieldValue.value.type === 'dropdown-multi') {
-                    // Handle multi-select dropdowns - convert array to readable string
-                    const data = fieldValue.value.data;
-                    if (Array.isArray(data)) {
-                        fieldValueData = data.join(', ');
-                    } else if (data && typeof data === 'object') {
-                        // If it's an object with text properties, extract them
-                        const texts = Object.values(data).filter(val => typeof val === 'string');
-                        fieldValueData = texts.join(', ');
-                    } else if (data != null) {
-                        fieldValueData = String(data);
-                    } else {
-                        fieldValueData = '';
-                    }
-                } else if (fieldValue.value.type === 'interaction') {
-                    // For relationship-intelligence fields, get the date
-                    if (fieldValue.value.data?.sentAt) {
-                        fieldValueData = fieldValue.value.data.sentAt;
-                    } else if (fieldValue.value.data?.startTime) {
-                        fieldValueData = fieldValue.value.data.startTime;
-                    }
+        // Build normalized maps and then assign stage/value/source reliably
+        const idToValue = new Map();
+        const nameToValue = new Map();
+        const getFieldNameById = (id) => (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(id))?.name || '';
+        fieldValues.forEach(fv => {
+            const idNorm = normalizeFieldId(fv.id || fv.field_id || fv.entityAttributeId);
+            const nameLower = (fv.name || getFieldNameById(idNorm)).toLowerCase();
+            let raw = null;
+            const v = fv.value;
+            if (v && Object.prototype.hasOwnProperty.call(v, 'data')) {
+                switch (v.type) {
+                    case 'number': raw = v.data; break;
+                    case 'number-multi': raw = Array.isArray(v.data) ? v.data[0] : v.data; break;
+                    case 'ranked-dropdown':
+                    case 'dropdown': raw = v.data?.text ?? v.data; break;
+                    case 'dropdown-multi': raw = Array.isArray(v.data) ? v.data.join(', ') : v.data; break;
+                    case 'text': raw = v.data; break;
+                    case 'interaction': raw = v.data?.sentAt || v.data?.startTime || null; break;
+                    default: raw = v.data;
                 }
             } else {
-                // Fallback to old structure
-                fieldValueData = fieldValue.value?.text || fieldValue.value;
+                raw = fv.value?.text ?? fv.value ?? null;
             }
-            
-            // Ensure fieldValueData is always a string for display
-            if (typeof fieldValueData === 'object') {
-                fieldValueData = JSON.stringify(fieldValueData);
-            } else if (fieldValueData !== null && fieldValueData !== undefined) {
-                fieldValueData = String(fieldValueData);
-            } else {
-                fieldValueData = '';
-            }
-            
-            if (fieldId == fieldMappings.stage) {
-                leadData.stage = fieldValueData;
-            } else if (fieldId == fieldMappings.value) {
-                leadData.value = parseFloat(fieldValueData) || 0;
-            } else if (fieldId == fieldMappings.source) {
-                // Handle source field specifically - if it's null or empty object, set to empty string
-                if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
-                    leadData.source = '';
-                } else {
-                    leadData.source = fieldValueData;
-                }
-                console.log('Source field processed (with defaults):', fieldId, fieldValueData, typeof fieldValueData);
-            } else if (fieldId == firstEmailField) {
-                leadData.firstEmail = fieldValueData;
-                // Calculate lead age from first email date
-                if (fieldValueData) {
-                    const firstEmailDate = new Date(fieldValueData);
-                    if (!isNaN(firstEmailDate.getTime())) {
-                        const now = new Date();
-                        const ageInDays = Math.floor((now - firstEmailDate) / (1000 * 60 * 60 * 24));
-                        leadData.leadAge = ageInDays;
-                    }
-                }
-            }
+            idToValue.set(idNorm, raw);
+            if (nameLower) nameToValue.set(nameLower, raw);
         });
+
+        const stageFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.stage))?.name?.toLowerCase() || '';
+        const valueFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.value))?.name?.toLowerCase() || '';
+        const sourceFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.source))?.name?.toLowerCase() || '';
+
+        const stageRaw = idToValue.get(normalizeFieldId(fieldMappings.stage)) ?? nameToValue.get(stageFieldName);
+        const valueRaw = idToValue.get(normalizeFieldId(fieldMappings.value)) ?? nameToValue.get(valueFieldName);
+        const sourceRaw = idToValue.get(normalizeFieldId(fieldMappings.source)) ?? nameToValue.get(sourceFieldName);
+        const firstEmailRaw = idToValue.get(normalizeFieldId(firstEmailField));
+
+        if (stageRaw != null) leadData.stage = String(stageRaw);
+        if (valueRaw != null) leadData.value = parseCurrencyNumber(valueRaw);
+        if (sourceRaw != null) leadData.source = String(sourceRaw);
+        if (firstEmailRaw) {
+            leadData.firstEmail = String(firstEmailRaw);
+            const firstEmailDate = new Date(leadData.firstEmail);
+            if (!isNaN(firstEmailDate.getTime())) {
+                const now = new Date();
+                leadData.leadAge = Math.floor((now - firstEmailDate) / (1000 * 60 * 60 * 24));
+            }
+        }
         
 
         // Extract Last Contact and Contact Direction from relationship-intelligence fields
@@ -2914,10 +2957,7 @@ async function processPipelineDataWithDefaults(data) {
         // Apply default stage if missing
         if (!leadData.stage && defaultSettings.defaultStageField && defaultSettings.defaultStageValue) {
             // Check if this lead has the default stage field but no value
-            const hasStageField = fieldValues.some(fv => {
-                const fieldId = fv.id;
-                return fieldId == defaultSettings.defaultStageField;
-            });
+            const hasStageField = fieldValues.some(fv => normalizeFieldId(fv.id) === normalizeFieldId(defaultSettings.defaultStageField));
             if (hasStageField) {
                 leadData.stage = defaultSettings.defaultStageValue;
             }
@@ -2961,9 +3001,9 @@ async function processPipelineDataWithDefaults(data) {
                         if (field && field.name === defaultSettings.closedWonValueField) {
                             let closedWonValue = 0;
                             if (fieldValue.value && Object.prototype.hasOwnProperty.call(fieldValue.value, 'data')) {
-                                closedWonValue = parseFloat(fieldValue.value.data) || 0;
+                                closedWonValue = parseCurrencyNumber(fieldValue.value.data);
                             } else {
-                                closedWonValue = parseFloat(fieldValue.value) || 0;
+                                closedWonValue = parseCurrencyNumber(fieldValue.value);
                             }
                             if (closedWonValue > 0) {
                                 leadData.value = closedWonValue;
@@ -3103,17 +3143,7 @@ function updatePiggyBank() {
 
         // If still zero and a field was selected, try extracting directly from field_values (robustly)
         if (closedWonValue === 0 && defaultSettings.closedWonValueField) {
-            const toNumber = (val) => {
-                if (val == null) return 0;
-                if (typeof val === 'number') return val;
-                if (typeof val === 'string') {
-                    // strip currency and thousands separators
-                    const cleaned = val.replace(/[$,\s]/g, '');
-                    const num = parseFloat(cleaned);
-                    return isNaN(num) ? 0 : num;
-                }
-                return 0;
-            };
+            const toNumber = (val) => parseCurrencyNumber(val);
 
             const getFieldNameById = (id) => {
                 const field = currentData.fields?.find(f => String(f.id) === String(id));
@@ -3143,6 +3173,8 @@ function updatePiggyBank() {
     // Update the display values
     const closedWonValueElement = document.getElementById('closedWonValue');
     const goalProgressElement = document.getElementById('goalProgress');
+    const cwGoal = document.getElementById('closedWonValue_goal');
+    const gpGoal = document.getElementById('goalProgress_goal');
     
     if (closedWonValueElement) {
         closedWonValueElement.textContent = formatCurrency(closedWonValue);
@@ -3151,6 +3183,13 @@ function updatePiggyBank() {
     if (goalProgressElement) {
         const progressPercent = Math.min(100, (closedWonValue / 100000000) * 100);
         goalProgressElement.textContent = `${progressPercent.toFixed(1)}%`;
+    }
+    if (cwGoal) cwGoal.textContent = formatCurrency(closedWonValue);
+    if (gpGoal) {
+        const p = Math.min(100, (closedWonValue / 100000000) * 100);
+        gpGoal.textContent = `${p.toFixed(1)}%`;
+        const fill = document.getElementById('goalProgressFill');
+        if (fill) fill.style.width = `${p}%`;
     }
     
     // Create progress bar visualization
@@ -3170,9 +3209,168 @@ function updatePiggyBank() {
             </div>
         </div>
     `;
-} 
+
+    // Pipeline coverage of remaining goal
+    try {
+        // Only consider open (non-closed, non-lost) leads for pipeline coverage
+        const openLeads = (currentData?.leads || []).filter(l => l.stage !== defaultSettings.closedWonStage && !defaultSettings.lostStages.includes(l.stage));
+        const weighted = openLeads.reduce((sum, l) => sum + calculateLeadWeightedValue(l), 0) || 0;
+        const remaining = Math.max(0, 100000000 - closedWonValue);
+        const coveragePct = remaining > 0 ? Math.min(100, (weighted / remaining) * 100) : 100;
+        const wpEl = document.getElementById('weightedPipeline_goal');
+        const covEl = document.getElementById('pipelineCoveragePct');
+        if (wpEl) wpEl.textContent = formatCurrency(weighted);
+        if (covEl) covEl.textContent = `${coveragePct.toFixed(1)}%`;
+    } catch (_) {}
+}
 
 // Toggle stage exclusion
+
+// ===============
+// Advanced List View (columns, sorting, pinned, saved views)
+// ===============
+(function(){
+  function storageKey(listId){ return `ui:listView:config:${listId||'default'}`; }
+  function loadCfg(listId){ try { return JSON.parse(localStorage.getItem(storageKey(listId))||'{}'); } catch(_) { return {}; } }
+  function saveCfg(listId, cfg){ try { localStorage.setItem(storageKey(listId), JSON.stringify(cfg||{})); } catch(_){} }
+  function defaultView(){ return { columns: ['Name','Stage','Value','Weighted','Last Contact'], pinned: ['Name'], sort: { column:'Name', dir:'asc' } }; }
+  function availableColumns(){
+    const base = new Set(['Name','Stage','Value','Weighted','Last Contact']);
+    try {
+      (currentData?.fields||[]).forEach(f=> base.add(f.name));
+      (currentData?.leads||[]).slice(0,50).forEach(lead => (lead.field_values||[]).forEach(fv => fv.name && base.add(fv.name)));
+    } catch(_){}
+    const preferred = ['Organization','Organizations','Owners','People','Source','First Email'];
+    preferred.forEach(p=>base.add(p));
+    return Array.from(base);
+  }
+  function strVal(v){ if(v==null) return ''; if(typeof v==='string'||typeof v==='number') return String(v); if(Array.isArray(v)) return v.map(strVal).join(', '); if(typeof v==='object') return v.name||v.text||v.title||v.value||v.data||''; return ''; }
+  function cell(lead,label){
+    switch(label){
+      case 'Name': return lead.entity?.name || `Lead ${lead.id}`;
+      case 'Stage': return lead.stage || '';
+      case 'Value': return `$${formatCurrency(Number(lead.value)||0)}`;
+      case 'Weighted': return `$${formatCurrency(calculateLeadWeightedValue(lead)||0)}`;
+      case 'Last Contact': return lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : '—';
+      default:
+        // Match by field name via currentData.fields mapping
+        const fieldsMap = new Map((currentData?.fields||[]).map(f => [normalizeFieldId(f.id), f.name]));
+        const match = (lead.field_values||[]).find(fv => {
+          const name = (fv.name || fieldsMap.get(normalizeFieldId(fv.id)) || '').toLowerCase();
+          return name === label.toLowerCase();
+        });
+        if (!match) return '';
+        const raw = (match.value && Object.prototype.hasOwnProperty.call(match.value,'data')) ? match.value.data : match.value;
+        return strVal(raw)||'';
+    }
+  }
+  async function render(){
+    const listId=document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+    const head=document.getElementById('listTableHead');
+    const body=document.getElementById('listTableBody');
+    const viewSelect=document.getElementById('listViewSelect');
+    if(!head||!body) return;
+    if(!listId){ head.innerHTML=''; body.innerHTML='<tr><td>Select a list in Settings to view entries.</td></tr>'; return; }
+    if(!currentData||!currentData.leads?.length){ try{ await loadPipelineData(); }catch(_){} }
+
+    const available=availableColumns();
+    const cfg=loadCfg(listId);
+    cfg.views=cfg.views||{ 'Default': defaultView() };
+    cfg.currentView=cfg.currentView||'Default';
+    saveCfg(listId,cfg);
+    const view=cfg.views[cfg.currentView]||defaultView();
+
+    // toolbar
+    if(viewSelect){ viewSelect.innerHTML=Object.keys(cfg.views).map(v=>`<option value="${v}">${v}</option>`).join(''); viewSelect.value=cfg.currentView; viewSelect.onchange=()=>{ cfg.currentView=viewSelect.value; saveCfg(listId,cfg); render(); } }
+
+    const cols=(view.columns||defaultView().columns).filter(c=>available.includes(c));
+    const pinned=new Set(view.pinned||[]);
+    const sort=view.sort||{ column:'Name', dir:'asc' };
+
+    // sort rows
+    let rows=(currentData?.leads||[]).slice();
+    rows.sort((a,b)=>{ const av=cell(a,sort.column).toString().toLowerCase(); const bv=cell(b,sort.column).toString().toLowerCase(); return sort.dir==='asc' ? (av>bv?1:av<bv?-1:0) : (av>bv?-1:av<bv?1:0); });
+
+    // head
+    head.innerHTML='';
+    let left=0;
+    cols.forEach(label=>{ const th=document.createElement('th'); th.textContent=label; th.style.cursor='pointer'; th.onclick=()=>{ const next=(sort.column===label && sort.dir==='asc')?'desc':'asc'; view.sort={column:label,dir:next}; cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); render(); }; if(pinned.has(label)){ th.classList.add('pinned'); th.style.setProperty('--pin-left', left+'px'); left+=160; } head.appendChild(th); });
+
+    // body
+    body.innerHTML = rows.map(lead=> `<tr>${cols.map(label=>`<td${pinned.has(label)?' class="pinned"':''}>${cell(lead,label)||'—'}</td>`).join('')}</tr>`).join('');
+
+    // drawer populate
+    const vis=document.getElementById('visibleCols'); const hid=document.getElementById('hiddenCols'); const drawer=document.getElementById('listColumnsDrawer'); const apply=document.getElementById('applyColumns'); const save=document.getElementById('saveListView'); const del=document.getElementById('deleteListView'); const nameInput=document.getElementById('viewName');
+    const setLists=()=>{ if(!vis||!hid)return; vis.innerHTML=cols.map(l=>`<li class="col-item" data-col="${l}"><span>${l}</span><div class="col-actions"><label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" class="pin" ${pinned.has(l)?'checked':''}/> Pin</label><button class="btn btn-outline up">▲</button><button class="btn btn-outline down">▼</button></div></li>`).join(''); const hidden=available.filter(a=>!cols.includes(a)); hid.innerHTML=hidden.map(l=>`<li class="col-item" data-col="${l}"><span>${l}</span><div class="col-actions"><button class="btn btn-outline add">Add</button></div></li>`).join(''); };
+    setLists();
+    if(vis){ vis.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('up')){ const idx=cols.indexOf(label); if(idx>0){ cols.splice(idx,1); cols.splice(idx-1,0,label); setLists(); } } else if(e.target.classList.contains('down')){ const idx=cols.indexOf(label); if(idx<cols.length-1){ cols.splice(idx,1); cols.splice(idx+1,0,label); setLists(); } } else if(e.target.classList.contains('pin')){ if(e.target.checked) pinned.add(label); else pinned.delete(label); } }; }
+    if(hid){ hid.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('add')){ cols.push(label); setLists(); } }; }
+    if(apply){ apply.onclick=()=>{ view.columns=cols.slice(); view.pinned=Array.from(pinned); cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); drawer?.classList.add('hidden'); render(); }; }
+    if(save){ save.onclick=()=>{ const nm=(nameInput?.value||'').trim(); if(!nm) return; cfg.views[nm]={ columns: cols.slice(), pinned:Array.from(pinned), sort: view.sort||{column:'Name',dir:'asc'} }; cfg.currentView=nm; saveCfg(listId,cfg); render(); }; }
+    if(del){ del.onclick=()=>{ if(cfg.currentView==='Default') return; delete cfg.views[cfg.currentView]; cfg.currentView='Default'; saveCfg(listId,cfg); render(); }; }
+  }
+  // expose
+  window.renderListView = render;
+})();
+
+// Enhanced List View V2: filters, drag-reorder, pinned offsets
+(function(){
+  function storageKey(listId){ return `ui:listView:config:${listId||'default'}`; }
+  function loadCfg(listId){ try { return JSON.parse(localStorage.getItem(storageKey(listId))||'{}'); } catch(_) { return {}; } }
+  function saveCfg(listId,cfg){ try { localStorage.setItem(storageKey(listId), JSON.stringify(cfg||{})); } catch(_){} }
+  function defaultView(){ return { columns:['Name','Stage','Value','Weighted','Last Contact'], pinned:['Name'], sort:{column:'Name',dir:'asc'}, filters:{} }; }
+  function available(){ const s=new Set(['Name','Stage','Value','Weighted','Last Contact']); try{ (currentData?.fields||[]).forEach(f=>s.add(f.name)); (currentData?.leads||[]).slice(0,50).forEach(l=>(l.field_values||[]).forEach(f=>f.name&&s.add(f.name))); }catch(_){} return Array.from(s); }
+  function str(v){ if(v==null) return ''; if(Array.isArray(v)) return v.map(str).join(', '); if(typeof v==='object') return v.name||v.text||v.title||v.value||v.data||''; return String(v); }
+  function cellVal(lead,label){ switch(label){ case 'Name': return lead.entity?.name||`Lead ${lead.id}`; case 'Stage': return lead.stage||''; case 'Value': return `$${formatCurrency(Number(lead.value)||0)}`; case 'Weighted': return `$${formatCurrency(calculateLeadWeightedValue(lead)||0)}`; case 'Last Contact': return lead.lastContact ? new Date(lead.lastContact).toLocaleDateString() : '—'; default: const fv=(lead.field_values||[]).find(f=>(f.name||'').toLowerCase()===label.toLowerCase()); const raw=fv?(f.value && Object.prototype.hasOwnProperty.call(f.value,'data')?f.value.data:f.value):null; return str(raw)||''; } }
+
+  async function renderListViewV2(){
+    const listId=document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
+    const head=document.getElementById('listTableHead');
+    const body=document.getElementById('listTableBody');
+    const selector=document.getElementById('listViewSelect');
+    if(!head||!body) return;
+    if(!listId){ head.innerHTML=''; body.innerHTML='<tr><td>Select a list in Settings to view entries.</td></tr>'; return; }
+    if(!currentData||!currentData.leads?.length){ try{ await loadPipelineData(); }catch(_){} }
+
+    const avail=available();
+    const cfg=loadCfg(listId); cfg.views=cfg.views||{ 'Default': defaultView() }; cfg.currentView=cfg.currentView||'Default'; saveCfg(listId,cfg);
+    const view=cfg.views[cfg.currentView]||defaultView();
+    const cols=(view.columns||defaultView().columns).filter(c=>avail.includes(c));
+    const pinned=new Set(view.pinned||[]);
+    const sort=view.sort||{column:'Name',dir:'asc'};
+    const filters=view.filters||{};
+
+    if(selector){ selector.innerHTML=Object.keys(cfg.views).map(n=>`<option value="${n}">${n}</option>`).join(''); selector.value=cfg.currentView; selector.onchange=()=>{ cfg.currentView=selector.value; saveCfg(listId,cfg); renderListViewV2(); } }
+
+    let rows=(currentData?.leads||[]).slice();
+    rows=rows.filter(lead=>cols.every(label=>{ const q=(filters[label]||'').toString().trim().toLowerCase(); if(!q) return true; return cellVal(lead,label).toString().toLowerCase().includes(q); }));
+    rows.sort((a,b)=>{ const av=cellVal(a,sort.column).toString().toLowerCase(); const bv=cellVal(b,sort.column).toString().toLowerCase(); return sort.dir==='asc' ? (av>bv?1:av<bv?-1:0) : (av>bv?-1:av<bv?1:0); });
+
+    // head + filters
+    head.innerHTML=''; const thead=head.parentElement; let left=0;
+    cols.forEach(label=>{ const th=document.createElement('th'); th.textContent=label; th.dataset.col=label; th.style.cursor='pointer'; th.onclick=()=>{ const next=(sort.column===label && sort.dir==='asc')?'desc':'asc'; view.sort={column:label,dir:next}; cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); renderListViewV2(); }; if(pinned.has(label)){ th.classList.add('pinned'); th.style.setProperty('--pin-left', left+'px'); left+=160; } head.appendChild(th); });
+    let filterRow=thead.querySelector('tr.filters'); if(!filterRow){ filterRow=document.createElement('tr'); filterRow.className='filters'; thead.appendChild(filterRow); }
+    filterRow.innerHTML=''; cols.forEach(label=>{ const th=document.createElement('th'); const input=document.createElement('input'); input.type='text'; input.placeholder='Search'; input.value=filters[label]||''; input.oninput=(e)=>{ view.filters=Object.assign({}, view.filters, { [label]: e.target.value }); cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); renderListViewV2(); }; th.appendChild(input); filterRow.appendChild(th); });
+
+    // body
+    body.innerHTML = rows.map(lead=>`<tr>${cols.map(label=>`<td data-col="${label}"${pinned.has(label)?' class="pinned"':''}>${cellVal(lead,label)||'—'}</td>`).join('')}</tr>`).join('');
+    requestAnimationFrame(()=>{ const ths=[...head.children]; let acc=0; const leftMap={}; ths.forEach(th=>{ const lbl=th.getAttribute('data-col'); if(pinned.has(lbl)){ th.classList.add('pinned'); th.style.setProperty('--pin-left', acc+'px'); leftMap[lbl]=acc; acc+=th.getBoundingClientRect().width; }}); document.querySelectorAll('#listTableBody td.pinned').forEach(td=>{ const lbl=td.getAttribute('data-col'); const left=leftMap[lbl]||0; td.style.setProperty('--pin-left', left+'px'); }); });
+
+    // drawer lists + drag-reorder
+    const vis=document.getElementById('visibleCols'); const hid=document.getElementById('hiddenCols'); const drawer=document.getElementById('listColumnsDrawer'); const apply=document.getElementById('applyColumns'); const save=document.getElementById('saveListView'); const del=document.getElementById('deleteListView'); const nameInput=document.getElementById('viewName');
+    const setLists=()=>{ if(!vis||!hid) return; vis.innerHTML=cols.map(l=>`<li class="col-item" data-col="${l}" draggable="true"><span>${l}</span><div class="col-actions"><label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" class="pin" ${pinned.has(l)?'checked':''}/> Pin</label><button class="btn btn-outline up">▲</button><button class="btn btn-outline down">▼</button></div></li>`).join(''); const hidden=available().filter(a=>!cols.includes(a)); hid.innerHTML=hidden.map(l=>`<li class="col-item" data-col="${l}"><span>${l}</span><div class="col-actions"><button class="btn btn-outline add">Add</button></div></li>`).join(''); vis.querySelectorAll('li').forEach(li=>{ li.addEventListener('dragstart',e=>{ e.dataTransfer.setData('text/plain', li.dataset.col); }); li.addEventListener('dragover',e=>{ e.preventDefault(); }); li.addEventListener('drop',e=>{ e.preventDefault(); const dragged=e.dataTransfer.getData('text/plain'); const from=cols.indexOf(dragged); const to=cols.indexOf(li.dataset.col); if(from>-1&&to>-1&&from!==to){ const [m]=cols.splice(from,1); cols.splice(to,0,m); setLists(); } }); }); };
+    setLists();
+    if(vis){ vis.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('up')){ const i=cols.indexOf(label); if(i>0){ cols.splice(i,1); cols.splice(i-1,0,label); setLists(); } } else if(e.target.classList.contains('down')){ const i=cols.indexOf(label); if(i<cols.length-1){ cols.splice(i,1); cols.splice(i+1,0,label); setLists(); } } else if(e.target.classList.contains('pin')){ if(e.target.checked) pinned.add(label); else pinned.delete(label); } };
+      const panel=document.querySelector('#listColumnsDrawer .drawer-panel'); if(panel){ panel.addEventListener('click', ev=>ev.stopPropagation()); }
+    }
+    if(hid){ hid.onclick=(e)=>{ const li=e.target.closest('li'); if(!li) return; const label=li.dataset.col; if(e.target.classList.contains('add')){ cols.push(label); setLists(); } }; }
+    if(apply){ apply.onclick=()=>{ view.columns=cols.slice(); view.pinned=Array.from(pinned); view.filters=filters; cfg.views[cfg.currentView]=view; saveCfg(listId,cfg); drawer?.classList.add('hidden'); renderListViewV2(); }; }
+    if(save){ save.onclick=()=>{ const nm=(nameInput?.value||'').trim(); if(!nm) return; cfg.views[nm]={ columns: cols.slice(), pinned:Array.from(pinned), sort:view.sort||{column:'Name',dir:'asc'}, filters:filters }; cfg.currentView=nm; saveCfg(listId,cfg); renderListViewV2(); }; }
+    if(del){ del.onclick=()=>{ if(cfg.currentView==='Default') return; delete cfg.views[cfg.currentView]; cfg.currentView='Default'; saveCfg(listId,cfg); renderListViewV2(); }; }
+  }
+  // override
+  window.renderListView = renderListViewV2;
+})();
 function toggleStageExclusion(stage, isExcluded) {
     if (isExcluded) {
         excludedStages.add(stage);

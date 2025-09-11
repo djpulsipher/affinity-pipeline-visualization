@@ -20,6 +20,7 @@ module.exports = async (req, res) => {
       let usingOffsetFallback = false;
       let pageNumber = 1;
       let offset = 0;
+      let nextAbsoluteUrl = null; // if API provides full nextUrl with cursor
       const PAGE_SIZE = 500;
       const MAX_PAGES = 200; // safety guard
       const debug = process.env.DEBUG_AFFINITY_PAGINATION === '1';
@@ -43,15 +44,19 @@ module.exports = async (req, res) => {
       };
 
       for (let i = 0; i < MAX_PAGES; i++) {
-        const params = { page_size: PAGE_SIZE, per_page: PAGE_SIZE };
-        if (pageToken) params.page_token = pageToken;
-        if (usingPageNumberFallback) { params.page = pageNumber; }
-        if (usingOffsetFallback) { params.limit = PAGE_SIZE; params.offset = offset; }
-        if (useFieldIds) params.fieldIds = fieldIds.join(','); else params.fieldTypes = ['enriched','list','global','relationship-intelligence'].join(',');
+        const endpoint = nextAbsoluteUrl || `/v2/lists/${listId}/list-entries`;
+        const params = nextAbsoluteUrl ? undefined : { page_size: PAGE_SIZE, per_page: PAGE_SIZE };
+        if (pageToken && params) params.page_token = pageToken;
+        if (usingPageNumberFallback && params) { params.page = pageNumber; }
+        if (usingOffsetFallback && params) { params.limit = PAGE_SIZE; params.offset = offset; }
+        if (!nextAbsoluteUrl) {
+          if (useFieldIds) params.fieldIds = fieldIds.join(',');
+          else params.fieldTypes = ['enriched','list','global','relationship-intelligence'].join(',');
+        }
 
         let resp;
         try {
-          resp = await makeAffinityRequestRaw(`/v2/lists/${listId}/list-entries`, params);
+          resp = await makeAffinityRequestRaw(endpoint, params);
         } catch (err) {
           if (useFieldIds) { useFieldIds = false; continue; }
           throw err;
@@ -75,7 +80,7 @@ module.exports = async (req, res) => {
         const currentPage = pag.page || pag.current_page || pag.page_number || pag.pageNumber || (usingPageNumberFallback ? pageNumber : 1);
         const perPage = pag.per_page || pag.page_size || (Array.isArray(data) ? data.length : PAGE_SIZE) || PAGE_SIZE;
         const totalPages = pag.total_pages || pag.totalPages;
-        const hasNextFlag = Boolean(pag.next || pag.next_page_url || pag.nextPageUrl || pag.has_next || pag.hasMore || pag.more);
+        const hasNextFlag = Boolean(pag.next || pag.next_url || pag.nextUrl || pag.next_page_url || pag.nextPageUrl || pag.has_next || pag.hasMore || pag.more);
 
         if (first) {
           try {
@@ -109,7 +114,16 @@ module.exports = async (req, res) => {
         }
 
         // Token-based continuation
-        if (nextToken) { pageToken = nextToken; continue; }
+        if (nextToken) { pageToken = nextToken; nextAbsoluteUrl = null; continue; }
+
+        // Cursor/URL-based continuation
+        if (pag?.nextUrl || pag?.next_url) {
+          nextAbsoluteUrl = pag.nextUrl || pag.next_url;
+          pageToken = undefined;
+          usingPageNumberFallback = false;
+          usingOffsetFallback = false;
+          continue;
+        }
 
         // Pagination object indicates more pages
         const hasPageMore = Boolean(totalPages ? currentPage < totalPages : hasNextFlag);

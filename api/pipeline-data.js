@@ -23,28 +23,37 @@ module.exports = async (req, res) => {
       const PAGE_SIZE = 500;
       const MAX_PAGES = 200; // safety guard
       const debug = process.env.DEBUG_AFFINITY_PAGINATION === '1';
+      let first = true;
+
+      const parseLinkForToken = (linkHeader) => {
+        if (!linkHeader) return null;
+        const parts = String(linkHeader).split(',');
+        for (const p of parts) {
+          if (/rel="next"/i.test(p)) {
+            const m = p.match(/<([^>]+)>/);
+            if (m && m[1]) {
+              try {
+                const u = new URL(m[1]);
+                return u.searchParams.get('page_token') || u.searchParams.get('pageToken');
+              } catch (_) {}
+            }
+          }
+        }
+        return null;
+      };
+
       for (let i = 0; i < MAX_PAGES; i++) {
         const params = { page_size: PAGE_SIZE };
         if (pageToken) params.page_token = pageToken;
-        if (usingPageNumberFallback) {
-          params.page = pageNumber;
-          params.per_page = PAGE_SIZE;
-        }
-        if (usingOffsetFallback) {
-          params.limit = PAGE_SIZE;
-          params.offset = offset;
-        }
-        if (useFieldIds) params.fieldIds = fieldIds.join(',');
-        else params.fieldTypes = ['enriched', 'list', 'global', 'relationship-intelligence'].join(',');
+        if (usingPageNumberFallback) { params.page = pageNumber; params.per_page = PAGE_SIZE; }
+        if (usingOffsetFallback) { params.limit = PAGE_SIZE; params.offset = offset; }
+        if (useFieldIds) params.fieldIds = fieldIds.join(','); else params.fieldTypes = ['enriched','list','global','relationship-intelligence'].join(',');
 
         let resp;
         try {
           resp = await makeAffinityRequestRaw(`/v2/lists/${listId}/list-entries`, params);
         } catch (err) {
-          if (useFieldIds) {
-            useFieldIds = false;
-            continue;
-          }
+          if (useFieldIds) { useFieldIds = false; continue; }
           throw err;
         }
 
@@ -53,36 +62,28 @@ module.exports = async (req, res) => {
         all.push(...data);
 
         const headers = resp.headers || {};
-        // Common header/body token variants
         let nextToken = headers['next-page-token']
           || headers['x-next-page-token']
           || headers['x-affinity-next-page-token']
           || body?.next_page_token
           || body?.nextPageToken
+          || parseLinkForToken(headers.link || headers.Link)
           || null;
 
-        // Parse Link header if present: <...page_token=XYZ>; rel="next"
-        if (!nextToken && headers.link) {
+        if (first) {
           try {
-            const linkHeader = headers.link;
-            const segments = linkHeader.split(',');
-            for (const seg of segments) {
-              const [urlPart, relPart] = seg.split(';').map(s => s.trim());
-              if (relPart && /rel\s*=\s*"?next"?/i.test(relPart)) {
-                const m = urlPart.match(/<([^>]+)>/);
-                if (m && m[1]) {
-                  const url = new URL(m[1]);
-                  const tokenFromLink = url.searchParams.get('page_token')
-                    || url.searchParams.get('pageToken')
-                    || url.searchParams.get('next_page_token');
-                  if (tokenFromLink) {
-                    nextToken = tokenFromLink;
-                    break;
-                  }
-                }
-              }
-            }
+            console.log('[Affinity] list-entries headers present:', Object.keys(headers));
+            console.log('[Affinity] body keys:', Object.keys(body || {}));
+            console.log('[Affinity] page_size returned:', data.length);
+            console.log('[Affinity] sample tokens:', {
+              header_next_page_token: headers['next-page-token'],
+              header_x_next_page_token: headers['x-next-page-token'],
+              header_link: headers['link'] || headers['Link'],
+              body_next_page_token: body?.next_page_token,
+              body_nextPageToken: body?.nextPageToken
+            });
           } catch (_) {}
+          first = false;
         }
 
         if (debug) {
@@ -94,43 +95,17 @@ module.exports = async (req, res) => {
             using_offset_fallback: usingOffsetFallback,
             page: usingPageNumberFallback ? pageNumber : undefined,
             offset: usingOffsetFallback ? offset : undefined,
-            header_keys: Object.keys(headers),
           });
         }
 
-        if (nextToken) {
-          pageToken = nextToken;
-          continue; // token-based pagination
-        }
+        if (nextToken) { pageToken = nextToken; continue; }
+        if (data.length === 0) break;
 
-        if (data.length === 0) break; // no more data
-
-        // If we got a full page but no token, try fallback styles
-        if (!usingPageNumberFallback && !usingOffsetFallback && data.length >= PAGE_SIZE) {
-          usingPageNumberFallback = true;
-          pageNumber = 2; // next page
-          continue;
-        }
-
-        if (usingPageNumberFallback) {
-          if (data.length < PAGE_SIZE) break; // last page reached
-          pageNumber += 1;
-          continue;
-        }
-
-        if (!usingOffsetFallback && data.length >= PAGE_SIZE) {
-          usingOffsetFallback = true;
-          offset = PAGE_SIZE; // next offset
-          continue;
-        }
-
-        if (usingOffsetFallback) {
-          if (data.length < PAGE_SIZE) break; // last page
-          offset += PAGE_SIZE;
-          continue;
-        }
-
-        break; // nothing else to do
+        if (!usingPageNumberFallback && !usingOffsetFallback && data.length >= PAGE_SIZE) { usingPageNumberFallback = true; pageNumber = 2; continue; }
+        if (usingPageNumberFallback) { if (data.length < PAGE_SIZE) break; pageNumber += 1; continue; }
+        if (!usingOffsetFallback && data.length >= PAGE_SIZE) { usingOffsetFallback = true; offset = PAGE_SIZE; continue; }
+        if (usingOffsetFallback) { if (data.length < PAGE_SIZE) break; offset += PAGE_SIZE; continue; }
+        break;
       }
       return all;
     }

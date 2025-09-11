@@ -43,9 +43,9 @@ module.exports = async (req, res) => {
       };
 
       for (let i = 0; i < MAX_PAGES; i++) {
-        const params = { page_size: PAGE_SIZE };
+        const params = { page_size: PAGE_SIZE, per_page: PAGE_SIZE };
         if (pageToken) params.page_token = pageToken;
-        if (usingPageNumberFallback) { params.page = pageNumber; params.per_page = PAGE_SIZE; }
+        if (usingPageNumberFallback) { params.page = pageNumber; }
         if (usingOffsetFallback) { params.limit = PAGE_SIZE; params.offset = offset; }
         if (useFieldIds) params.fieldIds = fieldIds.join(','); else params.fieldTypes = ['enriched','list','global','relationship-intelligence'].join(',');
 
@@ -70,11 +70,19 @@ module.exports = async (req, res) => {
           || parseLinkForToken(headers.link || headers.Link)
           || null;
 
+        // Read body.pagination if present to detect page/size/next
+        const pag = body?.pagination || {};
+        const currentPage = pag.page || pag.current_page || pag.page_number || pag.pageNumber || (usingPageNumberFallback ? pageNumber : 1);
+        const perPage = pag.per_page || pag.page_size || (Array.isArray(data) ? data.length : PAGE_SIZE) || PAGE_SIZE;
+        const totalPages = pag.total_pages || pag.totalPages;
+        const hasNextFlag = Boolean(pag.next || pag.next_page_url || pag.nextPageUrl || pag.has_next || pag.hasMore || pag.more);
+
         if (first) {
           try {
             console.log('[Affinity] list-entries headers present:', Object.keys(headers));
             console.log('[Affinity] body keys:', Object.keys(body || {}));
             console.log('[Affinity] page_size returned:', data.length);
+            console.log('[Affinity] pagination object:', pag && typeof pag === 'object' ? { ...pag } : pag);
             console.log('[Affinity] sample tokens:', {
               header_next_page_token: headers['next-page-token'],
               header_x_next_page_token: headers['x-next-page-token'],
@@ -89,23 +97,37 @@ module.exports = async (req, res) => {
         if (debug) {
           console.log('[affinity] fetched page', {
             count: data.length,
-            page_size: PAGE_SIZE,
+            requested_page_size: PAGE_SIZE,
+            effective_per_page: perPage,
             has_next_token: Boolean(nextToken),
+            has_page_more: Boolean(totalPages ? currentPage < totalPages : hasNextFlag),
             using_page_fallback: usingPageNumberFallback,
             using_offset_fallback: usingOffsetFallback,
-            page: usingPageNumberFallback ? pageNumber : undefined,
+            page: usingPageNumberFallback ? pageNumber : currentPage,
             offset: usingOffsetFallback ? offset : undefined,
           });
         }
 
+        // Token-based continuation
         if (nextToken) { pageToken = nextToken; continue; }
-        if (data.length === 0) break;
 
-        if (!usingPageNumberFallback && !usingOffsetFallback && data.length >= PAGE_SIZE) { usingPageNumberFallback = true; pageNumber = 2; continue; }
-        if (usingPageNumberFallback) { if (data.length < PAGE_SIZE) break; pageNumber += 1; continue; }
-        if (!usingOffsetFallback && data.length >= PAGE_SIZE) { usingOffsetFallback = true; offset = PAGE_SIZE; continue; }
-        if (usingOffsetFallback) { if (data.length < PAGE_SIZE) break; offset += PAGE_SIZE; continue; }
-        break;
+        // Pagination object indicates more pages
+        const hasPageMore = Boolean(totalPages ? currentPage < totalPages : hasNextFlag);
+        if (hasPageMore) {
+          usingPageNumberFallback = true;
+          pageNumber = (Number(currentPage) || 1) + 1;
+          continue;
+        }
+
+        // Offset fallback if API uses offset/limit and returned a full page
+        if (!usingOffsetFallback && data.length >= perPage) {
+          usingOffsetFallback = true;
+          offset = (Number(offset) || 0) + perPage;
+          continue;
+        }
+
+        // No more pages
+        if (data.length < perPage || !hasPageMore) break;
       }
       return all;
     }

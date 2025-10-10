@@ -38,6 +38,12 @@ let defaultSettings = {
 
 // New field mappings for lead age
 let firstEmailField = null;
+let currentMode = 'fundraising'; // 'fundraising' or 'deal'
+let dealFlowSettings = {
+    ownerField: '',
+    focusField: '',
+    nextStepField: ''
+};
 
 // Robust numeric parser for currency/number strings (handles $ and commas)
 function parseCurrencyNumber(input) {
@@ -100,6 +106,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
     // Attach renderer for UI router
     window.renderListView = renderListView;
+    window.renderDealFlowView = renderDealFlowView;
 });
 
 function initializeApp() {
@@ -132,8 +139,33 @@ function initializeApp() {
     // Load pipeline history
     loadPipelineHistory();
 
+    // Initialize list mode preference
+    try {
+        const savedMode = localStorage.getItem('ui:listMode');
+        if (savedMode === 'deal' || savedMode === 'fundraising') {
+            currentMode = savedMode;
+        }
+    } catch (_) { /* ignore */ }
+
+    const listModeSelect = document.getElementById('listMode');
+    if (listModeSelect) {
+        listModeSelect.value = currentMode;
+        listModeSelect.addEventListener('change', (e) => {
+            currentMode = e.target.value === 'deal' ? 'deal' : 'fundraising';
+            try { localStorage.setItem('ui:listMode', currentMode); } catch (_) {}
+            updateModeUI();
+            renderDealFlowView();
+            const targetView = currentMode === 'deal' ? 'dealflow' : 'funnel';
+            const navItem = document.querySelector(`.nav-item[data-view="${targetView}"]`);
+            if (navItem) {
+                navItem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }
+        });
+    }
+    updateModeUI();
+
     // Add event listeners with null checks
-    
+
     const loadDataBtn = document.getElementById('loadData');
     if (loadDataBtn) loadDataBtn.addEventListener('click', loadPipelineData);
     
@@ -151,7 +183,10 @@ function initializeApp() {
     
     const toggleViewBtn = document.getElementById('toggleView');
     if (toggleViewBtn) toggleViewBtn.addEventListener('click', toggleView);
-    
+
+    const dealflowRefreshBtn = document.getElementById('dealflowRefresh');
+    if (dealflowRefreshBtn) dealflowRefreshBtn.addEventListener('click', refreshData);
+
     const closeModalBtn = document.getElementById('closeModal');
     if (closeModalBtn) closeModalBtn.addEventListener('click', closeModal);
     
@@ -193,6 +228,15 @@ function initializeApp() {
     
     const ruleForm = document.getElementById('ruleForm');
     if (ruleForm) ruleForm.addEventListener('submit', saveRule);
+
+    const dealOwnerField = document.getElementById('dealOwnerField');
+    if (dealOwnerField) dealOwnerField.addEventListener('change', (e) => updateDealFlowSetting('ownerField', e.target.value));
+
+    const dealFocusField = document.getElementById('dealFocusField');
+    if (dealFocusField) dealFocusField.addEventListener('change', (e) => updateDealFlowSetting('focusField', e.target.value));
+
+    const dealNextStepField = document.getElementById('dealNextStepField');
+    if (dealNextStepField) dealNextStepField.addEventListener('change', (e) => updateDealFlowSetting('nextStepField', e.target.value));
     
     const cancelRuleBtn = document.getElementById('cancelRule');
     if (cancelRuleBtn) cancelRuleBtn.addEventListener('click', closeRuleModal);
@@ -310,11 +354,72 @@ function tryAutoLoadPipelineDataIfRestored() {
         const listId = document.getElementById('listSelect')?.value || localStorage.getItem('ui:lastListId');
         const stageField = document.getElementById('stageField')?.value || localStorage.getItem('ui:stageField');
         const valueField = document.getElementById('valueField')?.value || localStorage.getItem('ui:valueField');
-        if (listId && stageField && valueField) {
+        const storedMode = localStorage.getItem('ui:listMode');
+        const mode = storedMode === 'deal' ? 'deal' : currentMode;
+        const requiresValueField = mode !== 'deal';
+        if (listId && stageField && (!requiresValueField || valueField)) {
             didAutoLoadFromRestore = true;
             loadPipelineData().catch(() => { didAutoLoadFromRestore = false; });
         }
     } catch (_) { /* ignore */ }
+}
+
+function updateModeUI() {
+    const isDealMode = currentMode === 'deal';
+    document.querySelectorAll('.mode-fundraising').forEach(el => {
+        el.classList.toggle('hidden', isDealMode);
+    });
+    document.querySelectorAll('.mode-deal').forEach(el => {
+        el.classList.toggle('hidden', !isDealMode);
+    });
+    const fundraisingNav = document.querySelector('.nav-item[data-view="funnel"]');
+    const dealNav = document.querySelector('.nav-item[data-view="dealflow"]');
+    if (fundraisingNav) fundraisingNav.classList.toggle('muted', isDealMode);
+    if (dealNav) dealNav.classList.toggle('muted', !isDealMode);
+}
+
+function getDealFlowSettingsKey(listId) {
+    return `ui:dealFlowSettings:${listId}`;
+}
+
+function loadDealFlowSettingsForList(listId) {
+    const defaults = { ownerField: '', focusField: '', nextStepField: '' };
+    dealFlowSettings = { ...defaults };
+    if (!listId) return;
+    try {
+        const stored = localStorage.getItem(getDealFlowSettingsKey(listId));
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+                dealFlowSettings = { ...defaults, ...parsed };
+            }
+        }
+    } catch (_) { /* ignore */ }
+}
+
+function applyDealFlowSettingsToUI() {
+    const ownerSelect = document.getElementById('dealOwnerField');
+    const focusSelect = document.getElementById('dealFocusField');
+    const nextSelect = document.getElementById('dealNextStepField');
+
+    if (ownerSelect) ownerSelect.value = dealFlowSettings.ownerField || '';
+    if (focusSelect) focusSelect.value = dealFlowSettings.focusField || '';
+    if (nextSelect) nextSelect.value = dealFlowSettings.nextStepField || '';
+}
+
+function saveDealFlowSettings(listId) {
+    if (!listId) return;
+    try {
+        localStorage.setItem(getDealFlowSettingsKey(listId), JSON.stringify(dealFlowSettings));
+    } catch (_) { /* ignore */ }
+}
+
+function updateDealFlowSetting(key, value) {
+    if (!(key in dealFlowSettings)) return;
+    dealFlowSettings[key] = value || '';
+    const listId = getCurrentOrSavedListId();
+    saveDealFlowSettings(listId);
+    renderDealFlowView();
 }
 
 function updateListOptionCount(listId, count) {
@@ -385,6 +490,7 @@ async function loadLists() {
                         listSelect.value = savedListId;
                         // Load saved stage configuration for this list
                         loadStageConfigForList(savedListId);
+                        loadDealFlowSettingsForList(savedListId);
                         // Trigger loading of fields for the restored list and then try auto-load
                         await onListChange();
                         tryAutoLoadPipelineDataIfRestored();
@@ -410,6 +516,7 @@ async function onListChange() {
     // Load any saved stage configuration for this list
     if (listId) {
         loadStageConfigForList(listId);
+        loadDealFlowSettingsForList(listId);
     }
     if (!listId) return;
 
@@ -429,11 +536,17 @@ async function onListChange() {
             populateFieldDropdown('valueField', fields, 'Amount');
             populateFieldDropdown('sourceField', fields, 'Source');
             populateFieldDropdown('firstEmailField', fields, 'FirstEmail');
+            populateFieldDropdown('dealOwnerField', fields, 'Owner');
+            populateFieldDropdown('dealFocusField', fields, 'Focus');
+            populateFieldDropdown('dealNextStepField', fields, 'Next');
+
+            loadDealFlowSettingsForList(listId);
+            applyDealFlowSettingsToUI();
         } else {
             console.error('Fields is not an array:', fields);
             showNotification('Invalid field data received', 'error');
         }
-        
+
         hideLoading();
         // Attempt to auto-load pipeline data if we have required selectors
         tryAutoLoadPipelineDataIfRestored();
@@ -463,6 +576,12 @@ function populateFieldDropdown(selectId, fields, defaultType) {
             } else if (defaultType === 'Source' && field.name.toLowerCase().includes('source')) {
                 option.selected = true;
             } else if (defaultType === 'FirstEmail' && (field.name.toLowerCase().includes('first') && field.name.toLowerCase().includes('email'))) {
+                option.selected = true;
+            } else if (defaultType === 'Owner' && /(owner|lead|manager|partner)/i.test(field.name)) {
+                option.selected = true;
+            } else if (defaultType === 'Focus' && /(focus|sector|category|type|theme|industry)/i.test(field.name)) {
+                option.selected = true;
+            } else if (defaultType === 'Next' && /(next|step|note|action|update)/i.test(field.name)) {
                 option.selected = true;
             }
             
@@ -548,25 +667,42 @@ async function loadPipelineData() {
     const stageFieldId = document.getElementById('stageField').value;
     const valueFieldId = document.getElementById('valueField').value;
     const sourceFieldId = document.getElementById('sourceField').value;
-    
-    if (!listId || !stageFieldId || !valueFieldId) {
-        showNotification('Please select a list and required fields', 'error');
+
+    const requiresValueField = currentMode !== 'deal';
+    if (!listId || !stageFieldId || (requiresValueField && !valueFieldId)) {
+        const message = requiresValueField
+            ? 'Please select a list, stage field, and value field'
+            : 'Please select a list and stage field';
+        showNotification(message, 'error');
         return Promise.reject(new Error('Missing required fields'));
     }
-    
+
     try {
         showLoading('Loading pipeline data...');
-        
+
         // Store field mappings
         fieldMappings = {
             stage: stageFieldId,
-            value: valueFieldId,
-            source: sourceFieldId
+            value: valueFieldId || '',
+            source: sourceFieldId,
+            mode: currentMode,
+            dealOwner: dealFlowSettings.ownerField || '',
+            dealFocus: dealFlowSettings.focusField || '',
+            dealNextStep: dealFlowSettings.nextStepField || ''
         };
-        
+
         // Store new field mappings
         firstEmailField = document.getElementById('firstEmailField').value;
-        
+
+        try {
+            localStorage.setItem('ui:stageField', stageFieldId || '');
+            localStorage.setItem('ui:valueField', valueFieldId || '');
+            localStorage.setItem('ui:sourceField', sourceFieldId || '');
+            localStorage.setItem('ui:firstEmailField', firstEmailField || '');
+        } catch (_) { /* ignore persistence issues */ }
+
+        saveDealFlowSettings(listId);
+
         console.log('Loading pipeline data for list:', listId);
         console.log('Field mappings:', fieldMappings);
         
@@ -606,6 +742,7 @@ async function loadPipelineData() {
         initializeStageWeights();
         updateVisualization();
         updateSummaryStats();
+        renderDealFlowView();
 
         // Save pipeline snapshot for change tracking
         savePipelineSnapshot();
@@ -735,14 +872,14 @@ function processPipelineData(data) {
             
             const normId = normalizeFieldId(fieldId);
             const mapStage = normalizeFieldId(fieldMappings.stage);
-            const mapValue = normalizeFieldId(fieldMappings.value);
-            const mapSource = normalizeFieldId(fieldMappings.source);
+            const mapValue = fieldMappings.value ? normalizeFieldId(fieldMappings.value) : null;
+            const mapSource = fieldMappings.source ? normalizeFieldId(fieldMappings.source) : null;
 
             if (normId === mapStage) {
                 leadData.stage = fieldValueData;
-            } else if (normId === mapValue) {
+            } else if (mapValue && normId === mapValue) {
                 leadData.value = parseCurrencyNumber(fieldValueData);
-            } else if (normId === mapSource) {
+            } else if (mapSource && normId === mapSource) {
                 // Handle source field specifically - if it's null or empty object, set to empty string
                 if (fieldValueData === '' || fieldValueData === '{"type":"dropdown-multi","data":null}' || fieldValueData === '[object Object]') {
                     leadData.source = '';
@@ -1692,6 +1829,229 @@ async function renderListView() {
 
 // Expose for UI router
 window.renderListView = renderListView;
+
+function renderDealFlowView() {
+    const stageList = document.getElementById('dealStageList');
+    const ownerContainer = document.getElementById('dealOwnerBreakdown');
+    const tableBody = document.getElementById('dealFlowTableBody');
+    const ownerHeader = document.getElementById('dealOwnerHeader');
+    const focusHeader = document.getElementById('dealFocusHeader');
+    const nextHeader = document.getElementById('dealNextStepHeader');
+
+    if (!stageList || !ownerContainer || !tableBody) return;
+
+    const leads = currentData?.leads || [];
+    const ownerField = dealFlowSettings.ownerField;
+    const focusField = dealFlowSettings.focusField;
+    const nextStepField = dealFlowSettings.nextStepField;
+
+    if (ownerHeader) ownerHeader.textContent = ownerField ? (getFieldNameById(ownerField) || 'Owner') : 'Owner';
+    if (focusHeader) focusHeader.textContent = focusField ? (getFieldNameById(focusField) || 'Focus') : 'Focus';
+    if (nextHeader) nextHeader.textContent = nextStepField ? (getFieldNameById(nextStepField) || 'Next Step') : 'Next Step';
+
+    if (!leads.length) {
+        stageList.innerHTML = '<p class="empty">Load a list to see stage progress.</p>';
+        ownerContainer.innerHTML = ownerField ? '<p class="empty">No owner data available.</p>' : '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
+        tableBody.innerHTML = '<tr><td colspan="6">Configure deal flow fields in Settings to view entries.</td></tr>';
+        updateDealFlowSummaryStats([]);
+        return;
+    }
+
+    updateDealFlowSummaryStats(leads);
+
+    // Stage overview
+    const stageCounts = new Map();
+    leads.forEach(lead => {
+        const stage = lead.stage || 'Unstaged';
+        stageCounts.set(stage, (stageCounts.get(stage) || 0) + 1);
+    });
+
+    if (stageCounts.size === 0) {
+        stageList.innerHTML = '<p class="empty">No stages found for this list.</p>';
+    } else {
+        const total = leads.length || 1;
+        const order = (stageOrder && stageOrder.length ? stageOrder : currentData?.stages || []).slice();
+        const sortedStages = Array.from(stageCounts.entries()).sort((a, b) => {
+            const idxA = order.indexOf(a[0]);
+            const idxB = order.indexOf(b[0]);
+            if (idxA === -1 && idxB === -1) return a[0].localeCompare(b[0]);
+            if (idxA === -1) return 1;
+            if (idxB === -1) return -1;
+            return idxA - idxB;
+        });
+        stageList.innerHTML = sortedStages.map(([stage, count]) => {
+            const percent = Math.round((count / total) * 100);
+            const width = Math.max(percent, count > 0 ? 6 : 0);
+            return `
+                <div class="deal-stage">
+                  <div class="deal-stage-header"><span>${escapeHtml(stage)}</span><span>${count}</span></div>
+                  <div class="deal-stage-bar"><span style="width:${width}%"></span></div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Owner snapshot
+    if (!ownerField) {
+        ownerContainer.innerHTML = '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
+    } else {
+        const ownerCounts = new Map();
+        leads.forEach(lead => {
+            const ownerValue = getLeadFieldValue(lead, ownerField);
+            const label = ownerValue ? String(ownerValue) : 'Unassigned';
+            ownerCounts.set(label, (ownerCounts.get(label) || 0) + 1);
+        });
+        const sortedOwners = Array.from(ownerCounts.entries()).sort((a, b) => b[1] - a[1]);
+        ownerContainer.innerHTML = sortedOwners.map(([owner, count]) => {
+            return `<div class="owner-item"><strong>${escapeHtml(owner)}</strong><span>${count}</span></div>`;
+        }).join('');
+    }
+
+    // Deal roster table
+    const sanitize = (value) => {
+        if (value == null || value === '') return '—';
+        return escapeHtml(value);
+    };
+    const rows = leads.map(lead => {
+        const company = lead.entity?.name || `Lead ${lead.id}`;
+        const stage = lead.stage || 'Unstaged';
+        const owner = ownerField ? getLeadFieldValue(lead, ownerField) : '';
+        const focus = focusField ? getLeadFieldValue(lead, focusField) : '';
+        const nextStep = nextStepField ? getLeadFieldValue(lead, nextStepField) : '';
+        const daysSince = getDaysSince(lead.lastContact);
+        const rowClass = daysSince === null ? '' : daysSince <= 14 ? 'fresh' : daysSince > 30 ? 'stalled' : '';
+        const lastContact = lead.lastContact ? formatLastContact(lead.lastContact) : 'No contact info';
+        return {
+            rowClass,
+            company: sanitize(company),
+            stage: sanitize(stage),
+            owner: sanitize(owner),
+            focus: sanitize(focus),
+            nextStep: sanitize(nextStep),
+            lastContact: sanitize(lastContact)
+        };
+    });
+
+    tableBody.innerHTML = rows.map(row => `
+        <tr class="${row.rowClass}">
+          <td>${row.company}</td>
+          <td><span class="badge">${row.stage}</span></td>
+          <td>${row.owner}</td>
+          <td>${row.focus}</td>
+          <td>${row.nextStep}</td>
+          <td>${row.lastContact}</td>
+        </tr>
+    `).join('');
+}
+
+function updateDealFlowSummaryStats(leads) {
+    const activeEl = document.getElementById('dealActiveCount');
+    const stageEl = document.getElementById('dealStageCount');
+    const freshEl = document.getElementById('dealFreshCount');
+    const stalledEl = document.getElementById('dealStalledCount');
+    if (!activeEl || !stageEl || !freshEl || !stalledEl) return;
+
+    const list = leads || [];
+    const stages = new Set(list.map(lead => lead.stage || 'Unstaged'));
+    const freshCount = list.filter(lead => {
+        const days = getDaysSince(lead.lastContact);
+        return days !== null && days <= 14;
+    }).length;
+    const stalledCount = list.filter(lead => {
+        const days = getDaysSince(lead.lastContact);
+        return days === null || days > 30;
+    }).length;
+
+    activeEl.textContent = list.length;
+    stageEl.textContent = stages.size;
+    freshEl.textContent = freshCount;
+    stalledEl.textContent = stalledCount;
+}
+
+function getDaysSince(dateString) {
+    if (!dateString) return null;
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return null;
+    const diff = Date.now() - date.getTime();
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+function getFieldNameById(fieldId) {
+    if (!fieldId || !currentData || !currentData.fields) return '';
+    const normalized = normalizeFieldId(fieldId);
+    const matchById = currentData.fields.find(field => normalizeFieldId(field.id) === normalized);
+    if (matchById) return matchById.name || '';
+    const matchByName = currentData.fields.find(field => field.name === fieldId);
+    return matchByName ? matchByName.name || '' : '';
+}
+
+function getLeadFieldValue(lead, fieldIdOrName) {
+    if (!lead || !fieldIdOrName) return '';
+    const normalized = normalizeFieldId(fieldIdOrName);
+    const fieldMap = lead.fieldMap || {};
+    if (normalized && Object.prototype.hasOwnProperty.call(fieldMap, normalized) && fieldMap[normalized] !== '') {
+        return fieldMap[normalized];
+    }
+    const lowerName = String(fieldIdOrName).toLowerCase();
+    if (lowerName && Object.prototype.hasOwnProperty.call(fieldMap, lowerName) && fieldMap[lowerName] !== '') {
+        return fieldMap[lowerName];
+    }
+    const fieldValues = lead.field_values || [];
+    const match = fieldValues.find(fv => normalizeFieldId(fv.id || fv.field_id || fv.entityAttributeId) === normalized || (fv.name || '').toLowerCase() === lowerName);
+    if (match) {
+        const value = extractFieldDisplayValue(match);
+        if (value != null && value !== '') return value;
+    }
+    return '';
+}
+
+function extractFieldDisplayValue(fieldValue) {
+    if (!fieldValue) return '';
+    const value = fieldValue.value;
+    if (value && typeof value === 'object') {
+        if (Object.prototype.hasOwnProperty.call(value, 'text')) {
+            return value.text;
+        }
+        if (Object.prototype.hasOwnProperty.call(value, 'data')) {
+            const data = value.data;
+            if (Array.isArray(data)) {
+                return data.map(item => {
+                    if (item == null) return '';
+                    if (typeof item === 'object') {
+                        return item.text || item.name || JSON.stringify(item);
+                    }
+                    return String(item);
+                }).filter(Boolean).join(', ');
+            }
+            if (data && typeof data === 'object') {
+                if (data.text) return data.text;
+                if (data.name) return data.name;
+                if (data.label) return data.label;
+                if (data.amount) return data.amount;
+                if (data.sentAt) return data.sentAt;
+            }
+            if (data != null) return data;
+        }
+        if (value.name) return value.name;
+    }
+    if (fieldValue.text) return fieldValue.text;
+    if (value != null) return value;
+    if (fieldValue.data != null) return fieldValue.data;
+    return '';
+}
+
+function escapeHtml(input) {
+    return String(input).replace(/[&<>"']/g, char => {
+        switch (char) {
+            case '&': return '&amp;';
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '"': return '&quot;';
+            case "'": return '&#39;';
+            default: return char;
+        }
+    });
+}
 
 // Create legend
 function createLegend() {
@@ -2876,6 +3236,7 @@ async function processPipelineDataWithDefaults(data) {
         // Build normalized maps and then assign stage/value/source reliably
         const idToValue = new Map();
         const nameToValue = new Map();
+        const fieldMap = {};
         const getFieldNameById = (id) => (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(id))?.name || '';
         fieldValues.forEach(fv => {
             const idNorm = normalizeFieldId(fv.id || fv.field_id || fv.entityAttributeId);
@@ -2898,15 +3259,19 @@ async function processPipelineDataWithDefaults(data) {
             }
             idToValue.set(idNorm, raw);
             if (nameLower) nameToValue.set(nameLower, raw);
+            if (raw != null && raw !== '') {
+                fieldMap[idNorm] = raw;
+                if (nameLower) fieldMap[nameLower] = raw;
+            }
         });
 
         const stageFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.stage))?.name?.toLowerCase() || '';
-        const valueFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.value))?.name?.toLowerCase() || '';
-        const sourceFieldName = (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.source))?.name?.toLowerCase() || '';
+        const valueFieldName = fieldMappings.value ? (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.value))?.name?.toLowerCase() || '' : '';
+        const sourceFieldName = fieldMappings.source ? (data.fields || []).find(f => normalizeFieldId(f.id) === normalizeFieldId(fieldMappings.source))?.name?.toLowerCase() || '' : '';
 
         const stageRaw = idToValue.get(normalizeFieldId(fieldMappings.stage)) ?? nameToValue.get(stageFieldName);
-        const valueRaw = idToValue.get(normalizeFieldId(fieldMappings.value)) ?? nameToValue.get(valueFieldName);
-        const sourceRaw = idToValue.get(normalizeFieldId(fieldMappings.source)) ?? nameToValue.get(sourceFieldName);
+        const valueRaw = fieldMappings.value ? (idToValue.get(normalizeFieldId(fieldMappings.value)) ?? nameToValue.get(valueFieldName)) : null;
+        const sourceRaw = fieldMappings.source ? (idToValue.get(normalizeFieldId(fieldMappings.source)) ?? nameToValue.get(sourceFieldName)) : null;
         const firstEmailRaw = idToValue.get(normalizeFieldId(firstEmailField));
 
         if (stageRaw != null) leadData.stage = String(stageRaw);
@@ -2987,7 +3352,7 @@ async function processPipelineDataWithDefaults(data) {
                 leadData.value = defaultSettings.globalDefaultValue;
             }
         }
-        
+
         if (leadData.stage) {
             const isClosedWon = defaultSettings.closedWonStage === leadData.stage;
             const isLost = defaultSettings.lostStages.includes(leadData.stage);
@@ -3027,6 +3392,8 @@ async function processPipelineDataWithDefaults(data) {
                 processed.sources.add(leadData.source);
             }
         }
+
+        leadData.fieldMap = fieldMap;
     }
     
     processed.stages = Array.from(processed.stages);
@@ -4853,6 +5220,7 @@ function applyHistoricalChanges(startDate, endDate) {
     // Update the UI
     updateVisualization();
     updateSummaryStats();
+    renderDealFlowView();
 
     // Add revert button to the pipeline changes section
     const revertBtn = document.getElementById('revertToCurrent');
@@ -4887,6 +5255,7 @@ function revertToCurrentData() {
         // Update the UI
         updateVisualization();
         updateSummaryStats();
+        renderDealFlowView();
         
         // Remove revert button
         const revertBtn = document.getElementById('revertToCurrent');

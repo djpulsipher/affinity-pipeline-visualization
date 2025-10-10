@@ -311,23 +311,33 @@
                 <span class="value" id="dealFreshCount">0</span>
               </div>
               <div class="dealflow-summary-card">
-                <span class="label">Stalled (&gt;30d)</span>
+                <span class="label">Stalled (&gt;45d)</span>
                 <span class="value" id="dealStalledCount">0</span>
               </div>
             </div>
-            <div class="dealflow-layout">
-              <div class="dealflow-panel">
-                <h4><i class="fas fa-layer-group"></i> Stage Overview</h4>
-                <div id="dealStageList" class="deal-stage-list">
-                  <p class="empty">Load a list to see stage progress.</p>
+            <div class="dealflow-body">
+              <div class="dealflow-main">
+                <div class="deal-pipeline" id="dealPipeline">
+                  <p class="empty">Load a list to see pipeline progress.</p>
+                </div>
+                <div class="deal-stage-grid" id="dealStageDetails">
+                  <div class="deal-stage-card empty-state">Configure your list to visualize stages here.</div>
                 </div>
               </div>
-              <div class="dealflow-panel">
-                <h4><i class="fas fa-user-friends"></i> Owner Snapshot</h4>
-                <div id="dealOwnerBreakdown" class="deal-owner-list">
-                  <p class="empty">Pick an owner field in Settings to view assignments.</p>
+              <aside class="dealflow-side">
+                <div class="dealflow-panel">
+                  <h4><i class="fas fa-user-friends"></i> Owner Snapshot</h4>
+                  <div id="dealOwnerBreakdown" class="deal-owner-list">
+                    <p class="empty">Pick an owner field in Settings to view assignments.</p>
+                  </div>
                 </div>
-              </div>
+                <div class="dealflow-panel">
+                  <h4><i class="fas fa-star"></i> Pipeline Highlights</h4>
+                  <ul id="dealHighlights" class="deal-highlight-list">
+                    <li class="empty">Load a deal flow list to see highlights.</li>
+                  </ul>
+                </div>
+              </aside>
             </div>
             <div class="dealflow-table">
               <div class="section-header">

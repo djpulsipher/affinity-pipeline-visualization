@@ -70,6 +70,58 @@ function normalizeFieldId(raw) {
     return String(id).replace(/^field-/, '');
 }
 
+function formatDisplayValue(value, seen = new Set()) {
+    if (value == null) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (value instanceof Date) return value.toLocaleDateString();
+    if (Array.isArray(value)) {
+        const parts = value.map(item => formatDisplayValue(item, seen)).filter(Boolean);
+        return parts.join(', ');
+    }
+    if (typeof value === 'object') {
+        if (seen.has(value)) return '';
+        seen.add(value);
+
+        const prioritizedKeys = ['text', 'name', 'label', 'title', 'company', 'organization', 'email', 'url'];
+        for (const key of prioritizedKeys) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+                const formatted = formatDisplayValue(value[key], seen);
+                if (formatted) return formatted;
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(value, 'value')) {
+            const formatted = formatDisplayValue(value.value, seen);
+            if (formatted) return formatted;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(value, 'data')) {
+            const formatted = formatDisplayValue(value.data, seen);
+            if (formatted) return formatted;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(value, 'amount')) {
+            const formatted = formatDisplayValue(value.amount, seen);
+            if (formatted) return formatted;
+        }
+
+        const uniqueParts = Array.from(new Set(Object.values(value)
+            .map(item => formatDisplayValue(item, seen))
+            .filter(Boolean)));
+        if (uniqueParts.length) return uniqueParts.join(', ');
+
+        try {
+            const serialized = JSON.stringify(value);
+            return serialized === '{}' ? '' : serialized;
+        } catch (_) {
+            return '';
+        }
+    }
+    return '';
+}
+
 // Juvo Blue Color Scheme
 const colorSchemes = {
     sources: d3.scaleOrdinal(d3.schemeCategory10),
@@ -1831,14 +1883,15 @@ async function renderListView() {
 window.renderListView = renderListView;
 
 function renderDealFlowView() {
-    const stageList = document.getElementById('dealStageList');
+    const pipelineContainer = document.getElementById('dealPipeline');
+    const stageDetailsContainer = document.getElementById('dealStageDetails');
     const ownerContainer = document.getElementById('dealOwnerBreakdown');
     const tableBody = document.getElementById('dealFlowTableBody');
     const ownerHeader = document.getElementById('dealOwnerHeader');
     const focusHeader = document.getElementById('dealFocusHeader');
     const nextHeader = document.getElementById('dealNextStepHeader');
 
-    if (!stageList || !ownerContainer || !tableBody) return;
+    if (!pipelineContainer || !stageDetailsContainer || !ownerContainer || !tableBody) return;
 
     const leads = currentData?.leads || [];
     const ownerField = dealFlowSettings.ownerField;
@@ -1850,48 +1903,101 @@ function renderDealFlowView() {
     if (nextHeader) nextHeader.textContent = nextStepField ? (getFieldNameById(nextStepField) || 'Next Step') : 'Next Step';
 
     if (!leads.length) {
-        stageList.innerHTML = '<p class="empty">Load a list to see stage progress.</p>';
+        pipelineContainer.innerHTML = '<p class="empty">Load a list to see pipeline progress.</p>';
+        stageDetailsContainer.innerHTML = '<div class="deal-stage-card empty-state">Configure your list to visualize stages here.</div>';
         ownerContainer.innerHTML = ownerField ? '<p class="empty">No owner data available.</p>' : '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
         tableBody.innerHTML = '<tr><td colspan="6">Configure deal flow fields in Settings to view entries.</td></tr>';
         updateDealFlowSummaryStats([]);
+        updateDealFlowHighlights([], [], ownerField);
         return;
     }
 
     updateDealFlowSummaryStats(leads);
 
-    // Stage overview
-    const stageCounts = new Map();
+    const stageGroups = new Map();
     leads.forEach(lead => {
-        const stage = lead.stage || 'Unstaged';
-        stageCounts.set(stage, (stageCounts.get(stage) || 0) + 1);
+        const stageName = lead.stage || 'Unstaged';
+        if (!stageGroups.has(stageName)) stageGroups.set(stageName, []);
+        stageGroups.get(stageName).push(lead);
     });
 
-    if (stageCounts.size === 0) {
-        stageList.innerHTML = '<p class="empty">No stages found for this list.</p>';
+    const preferredOrder = (stageOrder && stageOrder.length ? stageOrder : currentData?.stages || []).filter(Boolean);
+    const orderedStages = [];
+    const seenStages = new Set();
+
+    preferredOrder.forEach(stageName => {
+        const stageLeads = stageGroups.get(stageName) || [];
+        orderedStages.push({ name: stageName, leads: stageLeads });
+        seenStages.add(stageName);
+    });
+
+    stageGroups.forEach((stageLeads, stageName) => {
+        if (!seenStages.has(stageName)) {
+            orderedStages.push({ name: stageName, leads: stageLeads });
+        }
+    });
+
+    if (!orderedStages.length) {
+        pipelineContainer.innerHTML = '<p class="empty">No stages found for this list.</p>';
+        stageDetailsContainer.innerHTML = '<div class="deal-stage-card empty-state">Add stages to your list to see the flow.</div>';
     } else {
-        const total = leads.length || 1;
-        const order = (stageOrder && stageOrder.length ? stageOrder : currentData?.stages || []).slice();
-        const sortedStages = Array.from(stageCounts.entries()).sort((a, b) => {
-            const idxA = order.indexOf(a[0]);
-            const idxB = order.indexOf(b[0]);
-            if (idxA === -1 && idxB === -1) return a[0].localeCompare(b[0]);
-            if (idxA === -1) return 1;
-            if (idxB === -1) return -1;
-            return idxA - idxB;
-        });
-        stageList.innerHTML = sortedStages.map(([stage, count]) => {
-            const percent = Math.round((count / total) * 100);
-            const width = Math.max(percent, count > 0 ? 6 : 0);
+        pipelineContainer.innerHTML = orderedStages.map((stage, index) => {
+            const stageCount = stage.leads.length;
+            const subtitle = stageCount === 1 ? '1 company' : `${stageCount} companies`;
             return `
-                <div class="deal-stage">
-                  <div class="deal-stage-header"><span>${escapeHtml(stage)}</span><span>${count}</span></div>
-                  <div class="deal-stage-bar"><span style="width:${width}%"></span></div>
+                <div class="pipeline-stage">
+                  <div class="stage-number">${index + 1}</div>
+                  <div class="stage-name">${escapeHtml(stage.name)}</div>
+                  <div class="stage-count">${subtitle}</div>
+                </div>
+            `;
+        }).join('');
+
+        stageDetailsContainer.innerHTML = orderedStages.map(stage => {
+            const leadsForStage = stage.leads.slice();
+            if (!leadsForStage.length) {
+                return `
+                    <div class="deal-stage-card">
+                      <header><h4>${escapeHtml(stage.name)}</h4><span class="badge muted">0</span></header>
+                      <p class="empty">No companies currently in this stage.</p>
+                    </div>
+                `;
+            }
+
+            const topLeads = leadsForStage.sort((a, b) => {
+                const aDate = a.lastContact ? new Date(a.lastContact).getTime() : 0;
+                const bDate = b.lastContact ? new Date(b.lastContact).getTime() : 0;
+                return bDate - aDate;
+            }).slice(0, 5);
+
+            const items = topLeads.map(lead => {
+                const company = escapeHtml(lead.entity?.name || `Lead ${lead.id}`);
+                const owner = ownerField ? getLeadFieldValue(lead, ownerField) : '';
+                const focus = focusField ? getLeadFieldValue(lead, focusField) : '';
+                const next = nextStepField ? getLeadFieldValue(lead, nextStepField) : '';
+                const metaParts = [];
+                if (owner) metaParts.push(escapeHtml(owner));
+                if (focus) metaParts.push(escapeHtml(focus));
+                if (next) metaParts.push(escapeHtml(next));
+                const contactLabel = formatRelativeDate(lead.lastContact);
+                if (contactLabel) metaParts.push(escapeHtml(contactLabel));
+                const meta = metaParts.length ? `<div class="deal-meta">${metaParts.join(' • ')}</div>` : '';
+                return `<li><span class="company">${company}</span>${meta}</li>`;
+            }).join('');
+
+            const remainder = leadsForStage.length - topLeads.length;
+            const footer = remainder > 0 ? `<footer>${remainder} more compan${remainder === 1 ? 'y' : 'ies'} in stage</footer>` : '';
+
+            return `
+                <div class="deal-stage-card">
+                  <header><h4>${escapeHtml(stage.name)}</h4><span class="badge">${leadsForStage.length}</span></header>
+                  <ul class="deal-stage-list">${items}</ul>
+                  ${footer}
                 </div>
             `;
         }).join('');
     }
 
-    // Owner snapshot
     if (!ownerField) {
         ownerContainer.innerHTML = '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
     } else {
@@ -1902,16 +2008,27 @@ function renderDealFlowView() {
             ownerCounts.set(label, (ownerCounts.get(label) || 0) + 1);
         });
         const sortedOwners = Array.from(ownerCounts.entries()).sort((a, b) => b[1] - a[1]);
+        const maxCount = sortedOwners.length ? sortedOwners[0][1] : 1;
         ownerContainer.innerHTML = sortedOwners.map(([owner, count]) => {
-            return `<div class="owner-item"><strong>${escapeHtml(owner)}</strong><span>${count}</span></div>`;
+            const percent = Math.round((count / leads.length) * 100);
+            const width = Math.max((count / maxCount) * 100, 8);
+            return `
+                <div class="owner-row">
+                  <div class="owner-row-header"><span class="owner-name">${escapeHtml(owner)}</span><span class="owner-count">${count}</span></div>
+                  <div class="owner-bar"><span style="width:${width}%"></span></div>
+                  <div class="owner-share">${percent}% of pipeline</div>
+                </div>
+            `;
         }).join('');
     }
 
-    // Deal roster table
+    updateDealFlowHighlights(leads, orderedStages, ownerField);
+
     const sanitize = (value) => {
-        if (value == null || value === '') return '—';
-        return escapeHtml(value);
+        const formatted = formatDisplayValue(value);
+        return formatted ? escapeHtml(formatted) : '—';
     };
+
     const rows = leads.map(lead => {
         const company = lead.entity?.name || `Lead ${lead.id}`;
         const stage = lead.stage || 'Unstaged';
@@ -1919,27 +2036,19 @@ function renderDealFlowView() {
         const focus = focusField ? getLeadFieldValue(lead, focusField) : '';
         const nextStep = nextStepField ? getLeadFieldValue(lead, nextStepField) : '';
         const daysSince = getDaysSince(lead.lastContact);
-        const rowClass = daysSince === null ? '' : daysSince <= 14 ? 'fresh' : daysSince > 30 ? 'stalled' : '';
-        const lastContact = lead.lastContact ? formatLastContact(lead.lastContact) : 'No contact info';
-        return {
-            rowClass,
-            company: sanitize(company),
-            stage: sanitize(stage),
-            owner: sanitize(owner),
-            focus: sanitize(focus),
-            nextStep: sanitize(nextStep),
-            lastContact: sanitize(lastContact)
-        };
+        const lastContact = formatRelativeDate(lead.lastContact);
+        const rowClass = daysSince === null ? '' : daysSince <= 14 ? 'fresh' : daysSince > 45 ? 'stalled' : '';
+        return { company, stage, owner, focus, nextStep, lastContact, rowClass };
     });
 
     tableBody.innerHTML = rows.map(row => `
         <tr class="${row.rowClass}">
-          <td>${row.company}</td>
-          <td><span class="badge">${row.stage}</span></td>
-          <td>${row.owner}</td>
-          <td>${row.focus}</td>
-          <td>${row.nextStep}</td>
-          <td>${row.lastContact}</td>
+          <td>${escapeHtml(row.company)}</td>
+          <td><span class="badge">${escapeHtml(row.stage)}</span></td>
+          <td>${sanitize(row.owner)}</td>
+          <td>${sanitize(row.focus)}</td>
+          <td>${sanitize(row.nextStep)}</td>
+          <td>${escapeHtml(row.lastContact)}</td>
         </tr>
     `).join('');
 }
@@ -1959,7 +2068,7 @@ function updateDealFlowSummaryStats(leads) {
     }).length;
     const stalledCount = list.filter(lead => {
         const days = getDaysSince(lead.lastContact);
-        return days === null || days > 30;
+        return days === null || days > 45;
     }).length;
 
     activeEl.textContent = list.length;
@@ -1976,6 +2085,89 @@ function getDaysSince(dateString) {
     return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
+function updateDealFlowHighlights(leads, orderedStages, ownerField) {
+    const highlightEl = document.getElementById('dealHighlights');
+    if (!highlightEl) return;
+
+    if (!leads || !leads.length) {
+        highlightEl.innerHTML = '<li class="empty">Load a deal flow list to see highlights.</li>';
+        return;
+    }
+
+    const highlights = [];
+
+    if (orderedStages && orderedStages.length) {
+        const busiest = orderedStages.slice().sort((a, b) => (b.leads?.length || 0) - (a.leads?.length || 0))[0];
+        if (busiest && busiest.leads && busiest.leads.length) {
+            highlights.push({
+                icon: 'fa-layer-group',
+                text: `${busiest.leads.length} compan${busiest.leads.length === 1 ? 'y' : 'ies'} in ${busiest.name}`
+            });
+        }
+    }
+
+    const freshLeads = leads.filter(lead => {
+        const days = getDaysSince(lead.lastContact);
+        return days !== null && days <= 7;
+    });
+    if (freshLeads.length) {
+        highlights.push({ icon: 'fa-bolt', text: `${freshLeads.length} deal${freshLeads.length === 1 ? '' : 's'} touched this week` });
+    }
+
+    const stalledLeads = leads.filter(lead => {
+        const days = getDaysSince(lead.lastContact);
+        return days === null || days > 60;
+    });
+    if (stalledLeads.length) {
+        highlights.push({ icon: 'fa-triangle-exclamation', text: `${stalledLeads.length} deal${stalledLeads.length === 1 ? '' : 's'} need attention (>60 days)` });
+    }
+
+    const mostRecentContact = leads
+        .filter(lead => lead.lastContact)
+        .sort((a, b) => new Date(b.lastContact) - new Date(a.lastContact))[0];
+    if (mostRecentContact) {
+        const company = mostRecentContact.entity?.name || `Lead ${mostRecentContact.id}`;
+        const owner = ownerField ? getLeadFieldValue(mostRecentContact, ownerField) : '';
+        const descriptor = owner ? `${company} • ${owner}` : company;
+        highlights.push({ icon: 'fa-handshake', text: `Recent touch: ${descriptor}` });
+    }
+
+    const oldestContact = leads
+        .filter(lead => lead.lastContact)
+        .sort((a, b) => new Date(a.lastContact) - new Date(b.lastContact))[0];
+    if (oldestContact) {
+        const company = oldestContact.entity?.name || `Lead ${oldestContact.id}`;
+        highlights.push({ icon: 'fa-hourglass-end', text: `${company} last touched ${formatRelativeDate(oldestContact.lastContact)}` });
+    }
+
+    if (!highlights.length) {
+        highlightEl.innerHTML = '<li class="empty">No highlights available yet — log more activity to generate insights.</li>';
+        return;
+    }
+
+    highlightEl.innerHTML = highlights.map(item => `
+        <li><i class="fas ${item.icon}"></i><span>${escapeHtml(item.text)}</span></li>
+    `).join('');
+}
+
+function formatRelativeDate(dateString) {
+    const days = getDaysSince(dateString);
+    if (days === null) return 'No contact logged';
+    if (days <= 0) return 'Today';
+    if (days === 1) return '1 day ago';
+    if (days < 7) return `${days} days ago`;
+    if (days < 30) {
+        const weeks = Math.floor(days / 7);
+        return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
+    }
+    const months = Math.floor(days / 30);
+    if (months < 12) {
+        return months === 1 ? '1 month ago' : `${months} months ago`;
+    }
+    const years = Math.floor(days / 365);
+    return years === 1 ? '1 year ago' : `${years} years ago`;
+}
+
 function getFieldNameById(fieldId) {
     if (!fieldId || !currentData || !currentData.fields) return '';
     const normalized = normalizeFieldId(fieldId);
@@ -1990,11 +2182,13 @@ function getLeadFieldValue(lead, fieldIdOrName) {
     const normalized = normalizeFieldId(fieldIdOrName);
     const fieldMap = lead.fieldMap || {};
     if (normalized && Object.prototype.hasOwnProperty.call(fieldMap, normalized) && fieldMap[normalized] !== '') {
-        return fieldMap[normalized];
+        const formatted = formatDisplayValue(fieldMap[normalized]);
+        if (formatted) return formatted;
     }
     const lowerName = String(fieldIdOrName).toLowerCase();
     if (lowerName && Object.prototype.hasOwnProperty.call(fieldMap, lowerName) && fieldMap[lowerName] !== '') {
-        return fieldMap[lowerName];
+        const formatted = formatDisplayValue(fieldMap[lowerName]);
+        if (formatted) return formatted;
     }
     const fieldValues = lead.field_values || [];
     const match = fieldValues.find(fv => normalizeFieldId(fv.id || fv.field_id || fv.entityAttributeId) === normalized || (fv.name || '').toLowerCase() === lowerName);
@@ -2007,37 +2201,22 @@ function getLeadFieldValue(lead, fieldIdOrName) {
 
 function extractFieldDisplayValue(fieldValue) {
     if (!fieldValue) return '';
-    const value = fieldValue.value;
-    if (value && typeof value === 'object') {
-        if (Object.prototype.hasOwnProperty.call(value, 'text')) {
-            return value.text;
-        }
-        if (Object.prototype.hasOwnProperty.call(value, 'data')) {
-            const data = value.data;
-            if (Array.isArray(data)) {
-                return data.map(item => {
-                    if (item == null) return '';
-                    if (typeof item === 'object') {
-                        return item.text || item.name || JSON.stringify(item);
-                    }
-                    return String(item);
-                }).filter(Boolean).join(', ');
-            }
-            if (data && typeof data === 'object') {
-                if (data.text) return data.text;
-                if (data.name) return data.name;
-                if (data.label) return data.label;
-                if (data.amount) return data.amount;
-                if (data.sentAt) return data.sentAt;
-            }
-            if (data != null) return data;
-        }
-        if (value.name) return value.name;
+    if (Object.prototype.hasOwnProperty.call(fieldValue, 'displayValue')) {
+        const formatted = formatDisplayValue(fieldValue.displayValue);
+        if (formatted) return formatted;
     }
-    if (fieldValue.text) return fieldValue.text;
-    if (value != null) return value;
-    if (fieldValue.data != null) return fieldValue.data;
-    return '';
+    if (Object.prototype.hasOwnProperty.call(fieldValue, 'display_value')) {
+        const formatted = formatDisplayValue(fieldValue.display_value);
+        if (formatted) return formatted;
+    }
+
+    const candidates = [fieldValue.text, fieldValue.value, fieldValue.data];
+    for (const candidate of candidates) {
+        const formatted = formatDisplayValue(candidate);
+        if (formatted) return formatted;
+    }
+
+    return formatDisplayValue(fieldValue);
 }
 
 function escapeHtml(input) {

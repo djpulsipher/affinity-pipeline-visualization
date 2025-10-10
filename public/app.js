@@ -44,6 +44,9 @@ let dealFlowSettings = {
     focusField: '',
     nextStepField: ''
 };
+let dealFunnelGraphInstance = null;
+let dealFunnelSnapshot = [];
+let dealFunnelResizeTimer = null;
 
 // Robust numeric parser for currency/number strings (handles $ and commas)
 function parseCurrencyNumber(input) {
@@ -84,6 +87,29 @@ function formatDisplayValue(value, seen = new Set()) {
         if (seen.has(value)) return '';
         seen.add(value);
 
+        const fullNameKey = Object.prototype.hasOwnProperty.call(value, 'full_name') ? 'full_name'
+            : (Object.prototype.hasOwnProperty.call(value, 'fullName') ? 'fullName' : null);
+        if (fullNameKey) {
+            const formatted = formatDisplayValue(value[fullNameKey], seen);
+            if (formatted) return formatted;
+        }
+
+        const firstName = value.first_name || value.firstName || value.given_name || value.givenName || '';
+        const lastName = value.last_name || value.lastName || value.family_name || value.familyName || '';
+        if (firstName || lastName) {
+            return `${firstName || ''} ${lastName || ''}`.trim();
+        }
+
+        if (value.person && typeof value.person === 'object') {
+            const personFormatted = formatDisplayValue(value.person, seen);
+            if (personFormatted) return personFormatted;
+        }
+
+        if (value.owner && typeof value.owner === 'object') {
+            const ownerFormatted = formatDisplayValue(value.owner, seen);
+            if (ownerFormatted) return ownerFormatted;
+        }
+
         const prioritizedKeys = ['text', 'name', 'label', 'title', 'company', 'organization', 'email', 'url'];
         for (const key of prioritizedKeys) {
             if (Object.prototype.hasOwnProperty.call(value, key)) {
@@ -107,9 +133,18 @@ function formatDisplayValue(value, seen = new Set()) {
             if (formatted) return formatted;
         }
 
-        const uniqueParts = Array.from(new Set(Object.values(value)
-            .map(item => formatDisplayValue(item, seen))
-            .filter(Boolean)));
+        const metaKeys = new Set([
+            'id', 'type', 'entity_type', 'entityType', 'entity_id', 'entityId', 'resource_type', 'resourceType',
+            'value_type', 'valueType', 'data_type', 'dataType', '__typename', 'global_id', 'globalId',
+            'record_id', 'recordId', 'field_id', 'fieldId', 'position', 'is_primary'
+        ]);
+
+        const filteredValues = Object.entries(value)
+            .filter(([key, val]) => !metaKeys.has(key) && val !== value)
+            .map(([, val]) => formatDisplayValue(val, seen))
+            .filter(part => part && !/^(number|text|date|currency|list|person|organization)$/i.test(part.trim()));
+
+        const uniqueParts = Array.from(new Set(filteredValues));
         if (uniqueParts.length) return uniqueParts.join(', ');
 
         try {
@@ -159,6 +194,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Attach renderer for UI router
     window.renderListView = renderListView;
     window.renderDealFlowView = renderDealFlowView;
+    window.addEventListener('resize', handleDealFunnelResize);
 });
 
 function initializeApp() {
@@ -1903,6 +1939,7 @@ function renderDealFlowView() {
     if (nextHeader) nextHeader.textContent = nextStepField ? (getFieldNameById(nextStepField) || 'Next Step') : 'Next Step';
 
     if (!leads.length) {
+        renderDealFlowFunnel([]);
         pipelineContainer.innerHTML = '<p class="empty">Load a list to see pipeline progress.</p>';
         stageDetailsContainer.innerHTML = '<div class="deal-stage-card empty-state">Configure your list to visualize stages here.</div>';
         ownerContainer.innerHTML = ownerField ? '<p class="empty">No owner data available.</p>' : '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
@@ -1936,6 +1973,8 @@ function renderDealFlowView() {
             orderedStages.push({ name: stageName, leads: stageLeads });
         }
     });
+
+    renderDealFlowFunnel(orderedStages);
 
     if (!orderedStages.length) {
         pipelineContainer.innerHTML = '<p class="empty">No stages found for this list.</p>';
@@ -2051,6 +2090,93 @@ function renderDealFlowView() {
           <td>${escapeHtml(row.lastContact)}</td>
         </tr>
     `).join('');
+}
+
+function renderDealFlowFunnel(stageData) {
+    const wrapper = document.getElementById('dealFunnelContainer');
+    const container = document.getElementById('dealFunnelGraph');
+    if (!wrapper || !container) return;
+
+    const prepared = (stageData || []).map(stage => {
+        const stageName = stage && Object.prototype.hasOwnProperty.call(stage, 'name') ? String(stage.name) : 'Stage';
+        let count = 0;
+        if (Array.isArray(stage?.leads)) {
+            count = stage.leads.length;
+        } else if (typeof stage?.count === 'number' && Number.isFinite(stage.count)) {
+            count = stage.count;
+        } else if (typeof stage?.count === 'string') {
+            const parsed = parseInt(stage.count, 10);
+            count = Number.isNaN(parsed) ? 0 : parsed;
+        }
+        return { name: stageName, count: Math.max(count, 0) };
+    });
+
+    if (!prepared.length) {
+        dealFunnelSnapshot = [];
+        wrapper.classList.add('empty');
+        container.classList.add('funnel-graph-placeholder');
+        container.innerHTML = '<p class="empty">Load a list to generate the funnel visualization.</p>';
+        dealFunnelGraphInstance = null;
+        return;
+    }
+
+    const hasVolume = prepared.some(item => item.count > 0);
+    if (!hasVolume) {
+        dealFunnelSnapshot = [];
+        wrapper.classList.add('empty');
+        container.classList.add('funnel-graph-placeholder');
+        container.innerHTML = '<p class="empty">No active companies currently flowing through these stages.</p>';
+        dealFunnelGraphInstance = null;
+        return;
+    }
+
+    if (typeof FunnelGraph === 'undefined') {
+        dealFunnelSnapshot = [];
+        wrapper.classList.add('empty');
+        container.classList.add('funnel-graph-placeholder');
+        container.innerHTML = '<p class="empty">Funnel visualization library is unavailable.</p>';
+        dealFunnelGraphInstance = null;
+        return;
+    }
+
+    dealFunnelSnapshot = prepared.map(item => ({ ...item }));
+    wrapper.classList.remove('empty');
+
+    const parentWidth = container.parentElement ? container.parentElement.clientWidth : 0;
+    const baseWidth = parentWidth || container.clientWidth || container.offsetWidth || 0;
+    const width = Math.max(baseWidth, 320);
+    const height = Math.max(Math.round(width * 0.32), 220);
+
+    const data = {
+        labels: prepared.map(item => item.name),
+        colors: ['#1e3a8a', '#3b82f6'],
+        values: prepared.map(item => item.count)
+    };
+
+    container.classList.remove('funnel-graph-placeholder');
+    container.innerHTML = '';
+    dealFunnelGraphInstance = new FunnelGraph({
+        container: '#dealFunnelGraph',
+        gradientDirection: 'horizontal',
+        data,
+        displayPercent: true,
+        direction: 'horizontal',
+        width,
+        height,
+        subLabelValue: 'raw'
+    });
+    dealFunnelGraphInstance.draw();
+}
+
+function handleDealFunnelResize() {
+    if (!dealFunnelSnapshot || !dealFunnelSnapshot.length) return;
+    if (typeof FunnelGraph === 'undefined') return;
+    if (dealFunnelResizeTimer) clearTimeout(dealFunnelResizeTimer);
+    dealFunnelResizeTimer = setTimeout(() => {
+        const snapshot = dealFunnelSnapshot.map(item => ({ name: item.name, count: item.count }));
+        renderDealFlowFunnel(snapshot);
+        dealFunnelResizeTimer = null;
+    }, 180);
 }
 
 function updateDealFlowSummaryStats(leads) {

@@ -2636,6 +2636,14 @@ body { font-family: var(--font-sans); background: radial-gradient(1200px 800px a
 .dealflow-summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 4px; }
 .dealflow-summary-card .label { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.06em; }
 .dealflow-summary-card .value { font-size: 26px; font-weight: 700; color: var(--brand-700); }
+.dealflow-funnel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px; }
+.dealflow-funnel .funnel-header { display: flex; flex-direction: column; gap: 4px; }
+.dealflow-funnel .funnel-header h4 { margin: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; color: var(--text); }
+.dealflow-funnel .funnel-caption { font-size: 0.85rem; color: var(--text-muted); }
+.dealflow-funnel .funnel { width: 100%; min-height: 240px; position: relative; }
+.dealflow-funnel .funnel svg { width: 100% !important; height: auto; }
+.dealflow-funnel .empty { text-align: center; color: var(--text-muted); margin: 32px 0; }
+.funnel-graph-placeholder { display: flex; align-items: center; justify-content: center; }
 .dealflow-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
 .dealflow-main { display: flex; flex-direction: column; gap: 16px; }
 .deal-pipeline { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(140px, 1fr); gap: 12px; padding: 18px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow); position: relative; overflow-x: auto; }
@@ -2723,6 +2731,7 @@ body { font-family: var(--font-sans); background: radial-gradient(1200px 800px a
   .dealflow-body { grid-template-columns: 1fr; }
   .dealflow-side { flex-direction: row; flex-wrap: wrap; }
   .dealflow-side .dealflow-panel { flex: 1 1 260px; }
+  .dealflow-funnel { padding: 16px; }
   .deal-pipeline { grid-auto-flow: row; grid-auto-columns: unset; }
   .pipeline-stage::after { display: none; }
 }
@@ -2733,4 +2742,5 @@ body { font-family: var(--font-sans); background: radial-gradient(1200px 800px a
   .content.container { padding: 16px; }
   .stats-row { grid-template-columns: 1fr; }
   .dealflow-side { flex-direction: column; }
+  .dealflow-funnel { padding: 16px; }
 }

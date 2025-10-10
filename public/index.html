@@ -8,6 +8,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <meta name="theme-color" content="#2563eb">
   <link href="styles.css" rel="stylesheet">
+  <link href="vendor/funnel-graph-main.min.css" rel="stylesheet">
+  <link href="vendor/funnel-graph-theme.min.css" rel="stylesheet">
 </head>
 <body>
   <div class="dashboard">
@@ -297,6 +299,15 @@
                 <button id="dealflowRefresh" class="btn btn-outline"><i class="fas fa-sync"></i> Refresh</button>
               </div>
             </div>
+            <div class="dealflow-funnel" id="dealFunnelContainer">
+              <div class="funnel-header">
+                <h4><i class="fas fa-filter"></i> Pipeline Funnel</h4>
+                <span class="funnel-caption">Stage-to-stage conversion snapshot</span>
+              </div>
+              <div id="dealFunnelGraph" class="funnel funnel-graph-placeholder">
+                <p class="empty">Load a list to generate the funnel visualization.</p>
+              </div>
+            </div>
             <div class="dealflow-summary-grid">
               <div class="dealflow-summary-card">
                 <span class="label">Active Deals</span>
@@ -584,6 +595,7 @@
   </div>
 
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="vendor/funnel-graph.min.js"></script>
   <script src="app.js"></script>
   <script src="ui.js"></script>
 </body>

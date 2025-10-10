@@ -224,14 +224,51 @@
                 <option value="">Select focus field...</option>
               </select>
             </div>
-            <div class="form-group">
-              <label for="dealNextStepField">Next Step / Notes Field:</label>
-              <select id="dealNextStepField" class="form-control">
-                <option value="">Select next step field...</option>
-              </select>
+          <div class="form-group">
+            <label for="dealNextStepField">Next Step / Notes Field:</label>
+            <select id="dealNextStepField" class="form-control">
+              <option value="">Select next step field...</option>
+            </select>
+          </div>
+          <div class="deal-stage-config">
+            <h4><i class="fas fa-diagram-project"></i> Stage Allocation</h4>
+            <p class="config-hint">Organize statuses into active pipeline order and dead outcomes.</p>
+            <div class="form-group stage-assignment-group">
+              <label for="dealStageAvailable">Stage to assign:</label>
+              <div class="stage-assignment">
+                <select id="dealStageAvailable" class="form-control">
+                  <option value="">Load pipeline data to populate stages...</option>
+                </select>
+                <div class="stage-assignment-actions">
+                  <button type="button" id="dealAddActiveStage" class="btn btn-outline btn-compact"><i class="fas fa-plus-circle"></i> Active</button>
+                  <button type="button" id="dealAddDeadStage" class="btn btn-outline btn-compact"><i class="fas fa-ban"></i> Dead</button>
+                </div>
+              </div>
+            </div>
+            <div class="deal-stage-columns">
+              <div class="stage-column">
+                <h5>Active Pipeline Order</h5>
+                <ul id="dealActiveStageList" class="stage-list">
+                  <li class="empty">Load pipeline data to manage stages.</li>
+                </ul>
+              </div>
+              <div class="stage-column">
+                <h5>Dead Outcomes</h5>
+                <ul id="dealDeadStageListConfig" class="stage-list">
+                  <li class="empty">No dead stages assigned.</li>
+                </ul>
+              </div>
             </div>
           </div>
-        </section>
+          <div class="form-group">
+            <label for="dealSecondaryField">Second Dimension (optional):</label>
+            <select id="dealSecondaryField" class="form-control">
+              <option value="">None (single dimension)</option>
+            </select>
+            <p class="config-hint">Choose a categorical field to segment each stage within the funnel.</p>
+          </div>
+        </div>
+      </section>
 
         <!-- Home composition (default) -->
         <section id="view-home">
@@ -302,10 +339,22 @@
             <div class="dealflow-funnel" id="dealFunnelContainer">
               <div class="funnel-header">
                 <h4><i class="fas fa-filter"></i> Pipeline Funnel</h4>
-                <span class="funnel-caption">Stage-to-stage conversion snapshot</span>
+                <span class="funnel-caption" id="dealFunnelCaption">Stage-to-stage conversion snapshot</span>
               </div>
-              <div id="dealFunnelGraph" class="funnel funnel-graph-placeholder">
-                <p class="empty">Load a list to generate the funnel visualization.</p>
+              <div class="dealflow-funnel-body">
+                <div id="dealFunnelGraph" class="funnel funnel-graph-placeholder">
+                  <p class="empty">Load a list to generate the funnel visualization.</p>
+                </div>
+                <aside class="deal-dead-summary" id="dealDeadStageSummary">
+                  <div class="dead-stage-header">
+                    <h5>Dead Outcomes</h5>
+                    <span class="dead-stage-caption">Use Settings to classify outcomes</span>
+                  </div>
+                  <div class="dead-stage-total">0 deals</div>
+                  <ul class="dead-stage-list">
+                    <li class="empty">Dead outcomes appear here once configured.</li>
+                  </ul>
+                </aside>
               </div>
             </div>
             <div class="dealflow-summary-grid">

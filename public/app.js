@@ -39,13 +39,17 @@ let defaultSettings = {
 // New field mappings for lead age
 let firstEmailField = null;
 let currentMode = 'fundraising'; // 'fundraising' or 'deal'
-let dealFlowSettings = {
+const defaultDealFlowSettings = {
     ownerField: '',
     focusField: '',
-    nextStepField: ''
+    nextStepField: '',
+    activeStages: [],
+    deadStages: [],
+    secondaryDimensionField: ''
 };
+let dealFlowSettings = { ...defaultDealFlowSettings };
 let dealFunnelGraphInstance = null;
-let dealFunnelSnapshot = [];
+let dealFunnelSnapshot = null;
 let dealFunnelResizeTimer = null;
 
 // Robust numeric parser for currency/number strings (handles $ and commas)
@@ -146,6 +150,8 @@ function formatDisplayValue(value, seen = new Set()) {
 
         const uniqueParts = Array.from(new Set(filteredValues));
         if (uniqueParts.length) return uniqueParts.join(', ');
+
+        if (!filteredValues.length) return '';
 
         try {
             const serialized = JSON.stringify(value);
@@ -325,7 +331,22 @@ function initializeApp() {
 
     const dealNextStepField = document.getElementById('dealNextStepField');
     if (dealNextStepField) dealNextStepField.addEventListener('change', (e) => updateDealFlowSetting('nextStepField', e.target.value));
-    
+
+    const dealSecondaryField = document.getElementById('dealSecondaryField');
+    if (dealSecondaryField) dealSecondaryField.addEventListener('change', (e) => updateDealFlowSetting('secondaryDimensionField', e.target.value));
+
+    const addActiveStageBtn = document.getElementById('dealAddActiveStage');
+    if (addActiveStageBtn) addActiveStageBtn.addEventListener('click', () => assignDealStageTo('active'));
+
+    const addDeadStageBtn = document.getElementById('dealAddDeadStage');
+    if (addDeadStageBtn) addDeadStageBtn.addEventListener('click', () => assignDealStageTo('dead'));
+
+    const activeStageList = document.getElementById('dealActiveStageList');
+    if (activeStageList) activeStageList.addEventListener('click', handleActiveStageListClick);
+
+    const deadStageList = document.getElementById('dealDeadStageListConfig');
+    if (deadStageList) deadStageList.addEventListener('click', handleDeadStageListClick);
+
     const cancelRuleBtn = document.getElementById('cancelRule');
     if (cancelRuleBtn) cancelRuleBtn.addEventListener('click', closeRuleModal);
     
@@ -470,34 +491,58 @@ function getDealFlowSettingsKey(listId) {
     return `ui:dealFlowSettings:${listId}`;
 }
 
+function ensureDealFlowSettingsShape(settings) {
+    const normalized = { ...defaultDealFlowSettings, ...(settings || {}) };
+    normalized.ownerField = normalized.ownerField || '';
+    normalized.focusField = normalized.focusField || '';
+    normalized.nextStepField = normalized.nextStepField || '';
+    normalized.secondaryDimensionField = normalized.secondaryDimensionField || '';
+    normalized.activeStages = Array.isArray(normalized.activeStages)
+        ? normalized.activeStages.filter(stage => typeof stage === 'string' && stage.trim() !== '')
+        : [];
+    normalized.deadStages = Array.isArray(normalized.deadStages)
+        ? normalized.deadStages.filter(stage => typeof stage === 'string' && stage.trim() !== '')
+        : [];
+    return normalized;
+}
+
 function loadDealFlowSettingsForList(listId) {
-    const defaults = { ownerField: '', focusField: '', nextStepField: '' };
-    dealFlowSettings = { ...defaults };
+    dealFlowSettings = { ...defaultDealFlowSettings };
     if (!listId) return;
     try {
         const stored = localStorage.getItem(getDealFlowSettingsKey(listId));
         if (stored) {
             const parsed = JSON.parse(stored);
             if (parsed && typeof parsed === 'object') {
-                dealFlowSettings = { ...defaults, ...parsed };
+                dealFlowSettings = ensureDealFlowSettingsShape(parsed);
+            } else {
+                dealFlowSettings = { ...defaultDealFlowSettings };
             }
+        } else {
+            dealFlowSettings = { ...defaultDealFlowSettings };
         }
     } catch (_) { /* ignore */ }
+    dealFlowSettings = ensureDealFlowSettingsShape(dealFlowSettings);
 }
 
 function applyDealFlowSettingsToUI() {
     const ownerSelect = document.getElementById('dealOwnerField');
     const focusSelect = document.getElementById('dealFocusField');
     const nextSelect = document.getElementById('dealNextStepField');
+    const secondarySelect = document.getElementById('dealSecondaryField');
 
     if (ownerSelect) ownerSelect.value = dealFlowSettings.ownerField || '';
     if (focusSelect) focusSelect.value = dealFlowSettings.focusField || '';
     if (nextSelect) nextSelect.value = dealFlowSettings.nextStepField || '';
+    if (secondarySelect) secondarySelect.value = dealFlowSettings.secondaryDimensionField || '';
+
+    refreshDealStageConfigLists();
 }
 
 function saveDealFlowSettings(listId) {
     if (!listId) return;
     try {
+        dealFlowSettings = ensureDealFlowSettingsShape(dealFlowSettings);
         localStorage.setItem(getDealFlowSettingsKey(listId), JSON.stringify(dealFlowSettings));
     } catch (_) { /* ignore */ }
 }
@@ -507,6 +552,229 @@ function updateDealFlowSetting(key, value) {
     dealFlowSettings[key] = value || '';
     const listId = getCurrentOrSavedListId();
     saveDealFlowSettings(listId);
+    renderDealFlowView();
+}
+
+function arraysEqual(a = [], b = []) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+function getAvailableDealStages() {
+    if (!currentData) return [];
+    const baseStages = Array.isArray(currentData.stages) ? currentData.stages.filter(Boolean) : [];
+    const extraStages = [];
+    (currentData.leads || []).forEach(lead => {
+        const stageName = lead.stage || 'Unstaged';
+        if (!stageName) return;
+        if (!baseStages.includes(stageName) && !extraStages.includes(stageName)) {
+            extraStages.push(stageName);
+        }
+    });
+    return baseStages.concat(extraStages);
+}
+
+function getEffectiveActiveStages() {
+    const stages = getAvailableDealStages();
+    if (!stages.length) return [];
+    const stageSet = new Set(stages);
+    const deadStages = Array.isArray(dealFlowSettings.deadStages)
+        ? dealFlowSettings.deadStages.filter(stage => stageSet.has(stage))
+        : [];
+    const storedActive = Array.isArray(dealFlowSettings.activeStages)
+        ? dealFlowSettings.activeStages.filter(stage => stageSet.has(stage) && !deadStages.includes(stage))
+        : [];
+    if (storedActive.length) return storedActive;
+    return stages.filter(stage => !deadStages.includes(stage));
+}
+
+function refreshDealStageConfigLists() {
+    const stageSelect = document.getElementById('dealStageAvailable');
+    const activeList = document.getElementById('dealActiveStageList');
+    const deadList = document.getElementById('dealDeadStageListConfig');
+    if (!stageSelect || !activeList || !deadList) return;
+
+    const stages = getAvailableDealStages();
+    const stageSet = new Set(stages);
+    const sanitizedDead = Array.isArray(dealFlowSettings.deadStages)
+        ? dealFlowSettings.deadStages.filter(stage => stageSet.has(stage))
+        : [];
+    const sanitizedActiveStored = Array.isArray(dealFlowSettings.activeStages)
+        ? dealFlowSettings.activeStages.filter(stage => stageSet.has(stage) && !sanitizedDead.includes(stage))
+        : [];
+
+    let settingsDirty = false;
+    if (!arraysEqual(sanitizedDead, dealFlowSettings.deadStages || [])) {
+        dealFlowSettings.deadStages = sanitizedDead;
+        settingsDirty = true;
+    }
+    if (!arraysEqual(sanitizedActiveStored, dealFlowSettings.activeStages || [])) {
+        dealFlowSettings.activeStages = sanitizedActiveStored;
+        settingsDirty = true;
+    }
+
+    const displayActive = sanitizedActiveStored.length
+        ? sanitizedActiveStored
+        : stages.filter(stage => !sanitizedDead.includes(stage));
+
+    const assignedSet = new Set([...displayActive, ...sanitizedDead]);
+    const availableChoices = stages.filter(stage => !assignedSet.has(stage));
+
+    if (!stages.length) {
+        stageSelect.innerHTML = '<option value="">Load pipeline data to populate stages...</option>';
+    } else if (!availableChoices.length) {
+        stageSelect.innerHTML = '<option value="">All stages allocated</option>';
+    } else {
+        stageSelect.innerHTML = ['<option value="">Select stage...</option>']
+            .concat(availableChoices.map(stage => `<option value="${escapeHtml(stage)}">${escapeHtml(stage)}</option>`))
+            .join('');
+    }
+
+    if (!displayActive.length) {
+        activeList.innerHTML = '<li class="empty">Load pipeline data to manage stages.</li>';
+    } else {
+        activeList.innerHTML = displayActive.map((stage, index) => {
+            const isFirst = index === 0;
+            const isLast = index === displayActive.length - 1;
+            return `
+                <li data-stage="${escapeHtml(stage)}">
+                  <span class="stage-label">${escapeHtml(stage)}</span>
+                  <div class="stage-item-actions">
+                    <button type="button" class="stage-item-btn" data-action="up" title="Move up" ${isFirst ? 'disabled' : ''}><i class="fas fa-chevron-up"></i></button>
+                    <button type="button" class="stage-item-btn" data-action="down" title="Move down" ${isLast ? 'disabled' : ''}><i class="fas fa-chevron-down"></i></button>
+                    <button type="button" class="stage-item-btn danger" data-action="mark-dead" title="Mark as dead"><i class="fas fa-ban"></i></button>
+                    <button type="button" class="stage-item-btn" data-action="remove" title="Remove from active"><i class="fas fa-minus-circle"></i></button>
+                  </div>
+                </li>
+            `;
+        }).join('');
+    }
+
+    if (!sanitizedDead.length) {
+        deadList.innerHTML = '<li class="empty">No dead stages assigned.</li>';
+    } else {
+        deadList.innerHTML = sanitizedDead.map(stage => `
+            <li data-stage="${escapeHtml(stage)}">
+              <span class="stage-label">${escapeHtml(stage)}</span>
+              <div class="stage-item-actions">
+                <button type="button" class="stage-item-btn" data-action="mark-active" title="Move to active"><i class="fas fa-arrow-up"></i></button>
+                <button type="button" class="stage-item-btn danger" data-action="remove" title="Remove from dead"><i class="fas fa-times"></i></button>
+              </div>
+            </li>
+        `).join('');
+    }
+
+    if (settingsDirty) {
+        const listId = getCurrentOrSavedListId();
+        saveDealFlowSettings(listId);
+    }
+}
+
+function assignDealStageTo(target) {
+    const stageSelect = document.getElementById('dealStageAvailable');
+    if (!stageSelect) return;
+    const stage = stageSelect.value;
+    if (!stage) return;
+
+    let active = getEffectiveActiveStages();
+    if (!Array.isArray(dealFlowSettings.activeStages) || !dealFlowSettings.activeStages.length) {
+        dealFlowSettings.activeStages = [...active];
+    }
+    active = Array.isArray(dealFlowSettings.activeStages) ? dealFlowSettings.activeStages.slice() : [];
+    let dead = Array.isArray(dealFlowSettings.deadStages) ? dealFlowSettings.deadStages.slice() : [];
+
+    if (target === 'active') {
+        if (!active.includes(stage)) active.push(stage);
+        dead = dead.filter(name => name !== stage);
+    } else if (target === 'dead') {
+        if (!dead.includes(stage)) dead.push(stage);
+        active = active.filter(name => name !== stage);
+    } else {
+        return;
+    }
+
+    dealFlowSettings.activeStages = Array.from(new Set(active));
+    dealFlowSettings.deadStages = Array.from(new Set(dead));
+    const listId = getCurrentOrSavedListId();
+    saveDealFlowSettings(listId);
+    refreshDealStageConfigLists();
+    renderDealFlowView();
+    stageSelect.value = '';
+}
+
+function handleActiveStageListClick(event) {
+    const button = event.target.closest('button[data-action]');
+    if (!button || button.disabled) return;
+    const listItem = button.closest('li[data-stage]');
+    if (!listItem) return;
+    event.preventDefault();
+
+    const stage = listItem.dataset.stage;
+    const action = button.dataset.action;
+
+    let active = getEffectiveActiveStages();
+    if (!Array.isArray(dealFlowSettings.activeStages) || !dealFlowSettings.activeStages.length) {
+        dealFlowSettings.activeStages = [...active];
+    }
+    active = Array.isArray(dealFlowSettings.activeStages) ? dealFlowSettings.activeStages.slice() : [];
+    let dead = Array.isArray(dealFlowSettings.deadStages) ? dealFlowSettings.deadStages.slice() : [];
+    const index = active.indexOf(stage);
+
+    if (action === 'up' && index > 0) {
+        [active[index - 1], active[index]] = [active[index], active[index - 1]];
+    } else if (action === 'down' && index >= 0 && index < active.length - 1) {
+        [active[index], active[index + 1]] = [active[index + 1], active[index]];
+    } else if (action === 'remove' && index !== -1) {
+        active.splice(index, 1);
+    } else if (action === 'mark-dead' && index !== -1) {
+        active.splice(index, 1);
+        if (!dead.includes(stage)) dead.push(stage);
+    } else {
+        return;
+    }
+
+    dealFlowSettings.activeStages = active;
+    dealFlowSettings.deadStages = Array.from(new Set(dead));
+    const listId = getCurrentOrSavedListId();
+    saveDealFlowSettings(listId);
+    refreshDealStageConfigLists();
+    renderDealFlowView();
+}
+
+function handleDeadStageListClick(event) {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const listItem = button.closest('li[data-stage]');
+    if (!listItem) return;
+    event.preventDefault();
+
+    const stage = listItem.dataset.stage;
+    const action = button.dataset.action;
+
+    let active = getEffectiveActiveStages();
+    if (!Array.isArray(dealFlowSettings.activeStages) || !dealFlowSettings.activeStages.length) {
+        dealFlowSettings.activeStages = [...active];
+    }
+    active = Array.isArray(dealFlowSettings.activeStages) ? dealFlowSettings.activeStages.slice() : [];
+    let dead = Array.isArray(dealFlowSettings.deadStages) ? dealFlowSettings.deadStages.slice() : [];
+
+    if (action === 'mark-active') {
+        dead = dead.filter(name => name !== stage);
+        if (!active.includes(stage)) active.push(stage);
+    } else if (action === 'remove') {
+        dead = dead.filter(name => name !== stage);
+    } else {
+        return;
+    }
+
+    dealFlowSettings.activeStages = Array.from(new Set(active));
+    dealFlowSettings.deadStages = Array.from(new Set(dead));
+    const listId = getCurrentOrSavedListId();
+    saveDealFlowSettings(listId);
+    refreshDealStageConfigLists();
     renderDealFlowView();
 }
 
@@ -627,6 +895,7 @@ async function onListChange() {
             populateFieldDropdown('dealOwnerField', fields, 'Owner');
             populateFieldDropdown('dealFocusField', fields, 'Focus');
             populateFieldDropdown('dealNextStepField', fields, 'Next');
+            populateFieldDropdown('dealSecondaryField', fields, 'Secondary');
 
             loadDealFlowSettingsForList(listId);
             applyDealFlowSettingsToUI();
@@ -1929,6 +2198,8 @@ function renderDealFlowView() {
 
     if (!pipelineContainer || !stageDetailsContainer || !ownerContainer || !tableBody) return;
 
+    refreshDealStageConfigLists();
+
     const leads = currentData?.leads || [];
     const ownerField = dealFlowSettings.ownerField;
     const focusField = dealFlowSettings.focusField;
@@ -1938,8 +2209,11 @@ function renderDealFlowView() {
     if (focusHeader) focusHeader.textContent = focusField ? (getFieldNameById(focusField) || 'Focus') : 'Focus';
     if (nextHeader) nextHeader.textContent = nextStepField ? (getFieldNameById(nextStepField) || 'Next Step') : 'Next Step';
 
+    const deadStageSet = new Set((dealFlowSettings.deadStages || []).filter(Boolean));
+    const activeLeads = leads.filter(lead => !deadStageSet.has(lead.stage));
+
     if (!leads.length) {
-        renderDealFlowFunnel([]);
+        renderDealFlowFunnel([], []);
         pipelineContainer.innerHTML = '<p class="empty">Load a list to see pipeline progress.</p>';
         stageDetailsContainer.innerHTML = '<div class="deal-stage-card empty-state">Configure your list to visualize stages here.</div>';
         ownerContainer.innerHTML = ownerField ? '<p class="empty">No owner data available.</p>' : '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
@@ -1949,7 +2223,7 @@ function renderDealFlowView() {
         return;
     }
 
-    updateDealFlowSummaryStats(leads);
+    updateDealFlowSummaryStats(activeLeads);
 
     const stageGroups = new Map();
     leads.forEach(lead => {
@@ -1958,27 +2232,35 @@ function renderDealFlowView() {
         stageGroups.get(stageName).push(lead);
     });
 
-    const preferredOrder = (stageOrder && stageOrder.length ? stageOrder : currentData?.stages || []).filter(Boolean);
+    const activeStageOrder = getEffectiveActiveStages();
     const orderedStages = [];
     const seenStages = new Set();
 
-    preferredOrder.forEach(stageName => {
-        const stageLeads = stageGroups.get(stageName) || [];
+    activeStageOrder.forEach(stageName => {
+        if (deadStageSet.has(stageName)) return;
+        const stageLeads = (stageGroups.get(stageName) || []).filter(lead => !deadStageSet.has(lead.stage));
         orderedStages.push({ name: stageName, leads: stageLeads });
         seenStages.add(stageName);
     });
 
     stageGroups.forEach((stageLeads, stageName) => {
-        if (!seenStages.has(stageName)) {
-            orderedStages.push({ name: stageName, leads: stageLeads });
+        if (!seenStages.has(stageName) && !deadStageSet.has(stageName)) {
+            orderedStages.push({ name: stageName, leads: stageLeads.filter(lead => !deadStageSet.has(lead.stage)) });
         }
     });
 
-    renderDealFlowFunnel(orderedStages);
+    const deadStagesData = Array.isArray(dealFlowSettings.deadStages)
+        ? dealFlowSettings.deadStages.filter(Boolean).map(stageName => ({
+            name: stageName,
+            leads: stageGroups.get(stageName) || []
+        }))
+        : [];
+
+    renderDealFlowFunnel(orderedStages, deadStagesData);
 
     if (!orderedStages.length) {
-        pipelineContainer.innerHTML = '<p class="empty">No stages found for this list.</p>';
-        stageDetailsContainer.innerHTML = '<div class="deal-stage-card empty-state">Add stages to your list to see the flow.</div>';
+        pipelineContainer.innerHTML = '<p class="empty">Assign at least one active stage in Settings to visualize the pipeline.</p>';
+        stageDetailsContainer.innerHTML = '<div class="deal-stage-card empty-state">Mark stages as active to populate these cards.</div>';
     } else {
         pipelineContainer.innerHTML = orderedStages.map((stage, index) => {
             const stageCount = stage.leads.length;
@@ -2041,7 +2323,7 @@ function renderDealFlowView() {
         ownerContainer.innerHTML = '<p class="empty">Pick an owner field in Settings to view assignments.</p>';
     } else {
         const ownerCounts = new Map();
-        leads.forEach(lead => {
+        activeLeads.forEach(lead => {
             const ownerValue = getLeadFieldValue(lead, ownerField);
             const label = ownerValue ? String(ownerValue) : 'Unassigned';
             ownerCounts.set(label, (ownerCounts.get(label) || 0) + 1);
@@ -2049,7 +2331,7 @@ function renderDealFlowView() {
         const sortedOwners = Array.from(ownerCounts.entries()).sort((a, b) => b[1] - a[1]);
         const maxCount = sortedOwners.length ? sortedOwners[0][1] : 1;
         ownerContainer.innerHTML = sortedOwners.map(([owner, count]) => {
-            const percent = Math.round((count / leads.length) * 100);
+            const percent = activeLeads.length ? Math.round((count / activeLeads.length) * 100) : 0;
             const width = Math.max((count / maxCount) * 100, 8);
             return `
                 <div class="owner-row">
@@ -2061,11 +2343,11 @@ function renderDealFlowView() {
         }).join('');
     }
 
-    updateDealFlowHighlights(leads, orderedStages, ownerField);
+    updateDealFlowHighlights(activeLeads, orderedStages, ownerField);
 
     const sanitize = (value) => {
         const formatted = formatDisplayValue(value);
-        return formatted ? escapeHtml(formatted) : '—';
+        return formatted ? escapeHtml(formatted) : 'No value';
     };
 
     const rows = leads.map(lead => {
@@ -2092,37 +2374,178 @@ function renderDealFlowView() {
     `).join('');
 }
 
-function renderDealFlowFunnel(stageData) {
+function buildDealFunnelContext(stageData, deadStageData) {
+    const context = {
+        preparedStages: [],
+        totalActive: 0,
+        stageTotals: [],
+        stagePercents: [],
+        showSecondary: false,
+        subLabels: [],
+        matrix: [],
+        segmentPercents: [],
+        deadSummary: [],
+        deadTotal: 0,
+        deadConfigured: Array.isArray(dealFlowSettings.deadStages) && dealFlowSettings.deadStages.length > 0,
+        secondaryFieldName: '',
+        totalDeals: 0
+    };
+
+    const normalizedStages = Array.isArray(stageData)
+        ? stageData.map(stage => ({
+            name: stage && Object.prototype.hasOwnProperty.call(stage, 'name') ? String(stage.name) : 'Stage',
+            leads: Array.isArray(stage?.leads) ? stage.leads : []
+        }))
+        : [];
+
+    context.preparedStages = normalizedStages.map(stage => ({ name: stage.name, count: stage.leads.length }));
+    context.totalActive = context.preparedStages.reduce((sum, stage) => sum + stage.count, 0);
+    context.stageTotals = context.preparedStages.map(stage => stage.count);
+    context.stagePercents = context.stageTotals.map(count => (context.totalActive ? Math.round((count / context.totalActive) * 100) : 0));
+
+    const secondaryField = dealFlowSettings.secondaryDimensionField;
+    if (secondaryField) {
+        const labelOrder = [];
+        const labelIndex = new Map();
+        normalizedStages.forEach(stage => {
+            stage.leads.forEach(lead => {
+                const raw = getLeadFieldValue(lead, secondaryField);
+                const label = raw ? String(raw) : 'Unassigned';
+                if (!labelIndex.has(label)) {
+                    labelIndex.set(label, labelOrder.length);
+                    labelOrder.push(label);
+                }
+            });
+        });
+        if (labelOrder.length) {
+            context.showSecondary = true;
+            context.subLabels = labelOrder;
+            context.matrix = normalizedStages.map(stage => {
+                const counts = new Array(labelOrder.length).fill(0);
+                stage.leads.forEach(lead => {
+                    const raw = getLeadFieldValue(lead, secondaryField);
+                    const label = raw ? String(raw) : 'Unassigned';
+                    const idx = labelIndex.get(label);
+                    if (typeof idx === 'number') counts[idx] += 1;
+                });
+                return counts;
+            });
+            context.segmentPercents = context.matrix.map((row, stageIndex) => {
+                const total = context.stageTotals[stageIndex] || 0;
+                return row.map(value => (total ? Math.round((value / total) * 100) : 0));
+            });
+            context.secondaryFieldName = getFieldNameById(secondaryField) || 'Segment';
+        }
+    }
+
+    context.deadSummary = Array.isArray(deadStageData)
+        ? deadStageData.map(stage => ({
+            name: stage && Object.prototype.hasOwnProperty.call(stage, 'name') ? String(stage.name) : 'Stage',
+            count: Array.isArray(stage?.leads) ? stage.leads.length : (stage?.count || 0)
+        })).filter(item => item.name)
+        : [];
+    context.deadTotal = context.deadSummary.reduce((sum, item) => sum + item.count, 0);
+    context.totalDeals = context.totalActive + context.deadTotal;
+    return context;
+}
+
+function updateDeadStageSummary(stages, total, configured, totalActive, totalDeals) {
+    const panel = document.getElementById('dealDeadStageSummary');
+    if (!panel) return;
+    const totalEl = panel.querySelector('.dead-stage-total');
+    const listEl = panel.querySelector('.dead-stage-list');
+    const captionEl = panel.querySelector('.dead-stage-caption');
+
+    if (!configured) {
+        if (totalEl) totalEl.textContent = 'Assign dead stages';
+        if (captionEl) captionEl.textContent = 'Use Settings to classify outcomes';
+        if (listEl) listEl.innerHTML = '<li class="empty">Dead outcomes appear here once configured.</li>';
+        return;
+    }
+
+    if (!stages || !stages.length) {
+        if (totalEl) totalEl.textContent = '0 deals';
+        if (captionEl) captionEl.textContent = totalActive ? 'All deals are active' : 'No dead outcomes';
+        if (listEl) listEl.innerHTML = '<li class="empty">Great news — nothing in dead stages.</li>';
+        return;
+    }
+
+    if (totalEl) totalEl.textContent = `${total} deal${total === 1 ? '' : 's'}`;
+    if (captionEl) {
+        const denominator = totalDeals || (totalActive + total);
+        const share = denominator ? Math.round((total / denominator) * 100) : 0;
+        captionEl.textContent = `${share}% of tracked deals`;
+    }
+    if (listEl) {
+        listEl.innerHTML = stages.map(stage => {
+            const percent = total ? Math.round((stage.count / total) * 100) : 0;
+            return `<li><span class="dead-stage-name">${escapeHtml(stage.name)}</span><span class="dead-stage-count">${stage.count} (${percent}%)</span></li>`;
+        }).join('');
+    }
+}
+
+function postProcessDealFunnelLabels(context) {
+    const graphEl = document.querySelector('#dealFunnelGraph .svg-funnel-js');
+    if (!graphEl) return;
+
+    const valueEls = graphEl.querySelectorAll('.label__value');
+    valueEls.forEach((valueEl, index) => {
+        const count = context.stageTotals[index] || 0;
+        valueEl.textContent = `${count} deal${count === 1 ? '' : 's'}`;
+    });
+
+    const percentEls = graphEl.querySelectorAll('.label__percentage');
+    percentEls.forEach((percentEl, index) => {
+        const percent = context.stagePercents[index] || 0;
+        percentEl.textContent = `${percent}%`;
+    });
+
+    if (context.showSecondary) {
+        const segmentRows = graphEl.querySelectorAll('.label__segment-percentages');
+        segmentRows.forEach((segmentEl, stageIndex) => {
+            const listItems = segmentEl.querySelectorAll('li');
+            listItems.forEach((item, subIndex) => {
+                const raw = context.matrix[stageIndex]?.[subIndex] || 0;
+                const percent = context.segmentPercents[stageIndex]?.[subIndex] || 0;
+                const labelEl = item.querySelector('.percentage__list-label');
+                if (labelEl) {
+                    labelEl.textContent = `${raw} (${percent}%)`;
+                }
+            });
+        });
+    }
+}
+
+function renderDealFlowFunnel(stageData, deadStageData = [], snapshot) {
     const wrapper = document.getElementById('dealFunnelContainer');
     const container = document.getElementById('dealFunnelGraph');
     if (!wrapper || !container) return;
 
-    const prepared = (stageData || []).map(stage => {
-        const stageName = stage && Object.prototype.hasOwnProperty.call(stage, 'name') ? String(stage.name) : 'Stage';
-        let count = 0;
-        if (Array.isArray(stage?.leads)) {
-            count = stage.leads.length;
-        } else if (typeof stage?.count === 'number' && Number.isFinite(stage.count)) {
-            count = stage.count;
-        } else if (typeof stage?.count === 'string') {
-            const parsed = parseInt(stage.count, 10);
-            count = Number.isNaN(parsed) ? 0 : parsed;
-        }
-        return { name: stageName, count: Math.max(count, 0) };
-    });
+    let context = snapshot || buildDealFunnelContext(stageData, deadStageData);
+    dealFunnelSnapshot = context;
 
-    if (!prepared.length) {
-        dealFunnelSnapshot = [];
+    const captionEl = document.getElementById('dealFunnelCaption');
+    if (captionEl) {
+        if (context.showSecondary && context.secondaryFieldName) {
+            captionEl.textContent = `Stage conversion segmented by ${context.secondaryFieldName}`;
+        } else {
+            captionEl.textContent = 'Stage-to-stage conversion snapshot';
+        }
+    }
+
+    updateDeadStageSummary(context.deadSummary, context.deadTotal, context.deadConfigured, context.totalActive, context.totalDeals);
+
+    if (!context.preparedStages.length) {
         wrapper.classList.add('empty');
         container.classList.add('funnel-graph-placeholder');
-        container.innerHTML = '<p class="empty">Load a list to generate the funnel visualization.</p>';
+        container.innerHTML = context.deadConfigured
+            ? '<p class="empty">Assign active stages in Settings to render the funnel.</p>'
+            : '<p class="empty">Load a list and configure active stages to render the funnel.</p>';
         dealFunnelGraphInstance = null;
         return;
     }
 
-    const hasVolume = prepared.some(item => item.count > 0);
-    if (!hasVolume) {
-        dealFunnelSnapshot = [];
+    if (!context.totalActive) {
         wrapper.classList.add('empty');
         container.classList.add('funnel-graph-placeholder');
         container.innerHTML = '<p class="empty">No active companies currently flowing through these stages.</p>';
@@ -2131,7 +2554,6 @@ function renderDealFlowFunnel(stageData) {
     }
 
     if (typeof FunnelGraph === 'undefined') {
-        dealFunnelSnapshot = [];
         wrapper.classList.add('empty');
         container.classList.add('funnel-graph-placeholder');
         container.innerHTML = '<p class="empty">Funnel visualization library is unavailable.</p>';
@@ -2139,42 +2561,53 @@ function renderDealFlowFunnel(stageData) {
         return;
     }
 
-    dealFunnelSnapshot = prepared.map(item => ({ ...item }));
     wrapper.classList.remove('empty');
-
-    const parentWidth = container.parentElement ? container.parentElement.clientWidth : 0;
-    const baseWidth = parentWidth || container.clientWidth || container.offsetWidth || 0;
-    const width = Math.max(baseWidth, 320);
-    const height = Math.max(Math.round(width * 0.32), 220);
-
-    const data = {
-        labels: prepared.map(item => item.name),
-        colors: ['#1e3a8a', '#3b82f6'],
-        values: prepared.map(item => item.count)
-    };
-
     container.classList.remove('funnel-graph-placeholder');
     container.innerHTML = '';
+
+    const parentWidth = container.parentElement ? container.parentElement.clientWidth : 0;
+    const width = Math.max(parentWidth || container.clientWidth || container.offsetWidth || 360, 360);
+    const height = Math.max(context.preparedStages.length * 140, 420);
+
+    let colors;
+    if (context.showSecondary) {
+        const palette = ['#0f172a', '#1e3a8a', '#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'];
+        colors = context.subLabels.map((_, index) => palette[index % palette.length]);
+    } else {
+        const gradientStops = ['#0f172a', '#1e3a8a', '#2563eb', '#60a5fa'];
+        colors = context.preparedStages.map(() => gradientStops);
+    }
+
+    const data = {
+        labels: context.preparedStages.map(stage => stage.name),
+        values: context.showSecondary ? context.matrix : context.preparedStages.map(stage => stage.count),
+        colors
+    };
+
+    if (context.showSecondary) {
+        data.subLabels = context.subLabels;
+    }
+
     dealFunnelGraphInstance = new FunnelGraph({
         container: '#dealFunnelGraph',
-        gradientDirection: 'horizontal',
+        gradientDirection: 'vertical',
         data,
         displayPercent: true,
-        direction: 'horizontal',
+        direction: 'vertical',
         width,
         height,
-        subLabelValue: 'raw'
+        subLabelValue: 'percent'
     });
     dealFunnelGraphInstance.draw();
+    postProcessDealFunnelLabels(context);
 }
 
 function handleDealFunnelResize() {
-    if (!dealFunnelSnapshot || !dealFunnelSnapshot.length) return;
+    if (!dealFunnelSnapshot) return;
     if (typeof FunnelGraph === 'undefined') return;
     if (dealFunnelResizeTimer) clearTimeout(dealFunnelResizeTimer);
     dealFunnelResizeTimer = setTimeout(() => {
-        const snapshot = dealFunnelSnapshot.map(item => ({ name: item.name, count: item.count }));
-        renderDealFlowFunnel(snapshot);
+        renderDealFlowFunnel(null, null, dealFunnelSnapshot);
         dealFunnelResizeTimer = null;
     }, 180);
 }
@@ -2186,7 +2619,8 @@ function updateDealFlowSummaryStats(leads) {
     const stalledEl = document.getElementById('dealStalledCount');
     if (!activeEl || !stageEl || !freshEl || !stalledEl) return;
 
-    const list = leads || [];
+    const deadSet = new Set((dealFlowSettings.deadStages || []).filter(Boolean));
+    const list = (leads || []).filter(lead => !deadSet.has(lead.stage));
     const stages = new Set(list.map(lead => lead.stage || 'Unstaged'));
     const freshCount = list.filter(lead => {
         const days = getDaysSince(lead.lastContact);

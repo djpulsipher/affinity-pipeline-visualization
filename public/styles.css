@@ -2663,7 +2663,7 @@ body { font-family: var(--font-sans); background: radial-gradient(1200px 800px a
 .dealflow-funnel .funnel-header h4 { margin: 0; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; color: var(--text); }
 .dealflow-funnel .funnel-caption { font-size: 0.85rem; color: var(--text-muted); }
 .dealflow-funnel .funnel { width: 100%; min-height: 240px; position: relative; }
-.dealflow-funnel .funnel svg { width: 100% !important; height: auto; }
+.dealflow-funnel .funnel svg { width: 100% !important; height: 100% !important; }
 .dealflow-funnel .empty { text-align: center; color: var(--text-muted); margin: 32px 0; }
 .dealflow-funnel-body { display: flex; gap: 20px; align-items: stretch; flex-wrap: wrap; }
 .dealflow-funnel-body .funnel { flex: 1 1 480px; min-height: 420px; }
@@ -2677,12 +2677,12 @@ body { font-family: var(--font-sans); background: radial-gradient(1200px 800px a
 .deal-dead-summary .dead-stage-list li.empty { color: var(--text-muted); font-style: italic; justify-content: flex-start; }
 .deal-dead-summary .dead-stage-name { font-weight: 600; }
 .deal-dead-summary .dead-stage-count { font-weight: 600; color: var(--brand-600, #2563eb); }
-.dealflow-funnel .svg-funnel-js .label__title { color: var(--text); font-weight: 600; }
-.dealflow-funnel .svg-funnel-js .label__value,
-.dealflow-funnel .svg-funnel-js .label__percentage { color: var(--text); font-weight: 600; }
-.dealflow-funnel .svg-funnel-js .segment-percentage__list li { color: var(--text-muted); }
-.dealflow-funnel .svg-funnel-js .segment-percentage__list .percentage__list-label { color: var(--text); font-weight: 600; }
-#dealFunnelGraph { min-height: 420px; }
+.dealflow-funnel .svg-funnel-js .svg-funnel-js__labels .svg-funnel-js__label .label__title,
+.dealflow-funnel .svg-funnel-js .svg-funnel-js__labels .svg-funnel-js__label .label__value { color: var(--text) !important; font-weight: 600; }
+.dealflow-funnel .svg-funnel-js .svg-funnel-js__labels .svg-funnel-js__label .label__percentage { color: var(--brand-700) !important; font-weight: 700; }
+.dealflow-funnel .svg-funnel-js .segment-percentage__list li { color: var(--text-muted) !important; }
+.dealflow-funnel .svg-funnel-js .segment-percentage__list .percentage__list-label { color: var(--text) !important; font-weight: 600; }
+#dealFunnelGraph { min-height: 420px; height: 100%; }
 .funnel-graph-placeholder { display: flex; align-items: center; justify-content: center; }
 .dealflow-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
 .dealflow-main { display: flex; flex-direction: column; gap: 16px; }

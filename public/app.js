@@ -79,7 +79,32 @@ function normalizeFieldId(raw) {
 
 function formatDisplayValue(value, seen = new Set()) {
     if (value == null) return '';
-    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return '';
+
+        const lowered = trimmed.toLowerCase();
+        if (lowered === 'null' || lowered === 'undefined') return '';
+        if (/^(number|text|date|currency|list|person|organization|interaction)$/i.test(trimmed)) return '';
+        if (trimmed === '[object Object]') return '';
+
+        const looksJson = (trimmed.startsWith('{') && trimmed.endsWith('}'))
+            || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+        if (looksJson) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (parsed != null && typeof parsed === 'object') {
+                    const formatted = formatDisplayValue(parsed, seen);
+                    if (formatted) return formatted;
+                    return '';
+                }
+            } catch (_) {
+                // fall through to return the trimmed string when JSON parsing fails
+            }
+        }
+
+        return trimmed;
+    }
     if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
     if (typeof value === 'boolean') return value ? 'Yes' : 'No';
     if (value instanceof Date) return value.toLocaleDateString();
@@ -161,6 +186,46 @@ function formatDisplayValue(value, seen = new Set()) {
         }
     }
     return '';
+}
+
+function hexToRgbComponents(hex) {
+    const normalized = hex.replace('#', '');
+    if (normalized.length !== 6) return { r: 0, g: 0, b: 0 };
+    const value = parseInt(normalized, 16);
+    return {
+        r: (value >> 16) & 255,
+        g: (value >> 8) & 255,
+        b: value & 255
+    };
+}
+
+function rgbToHexComponent(value) {
+    const clamped = Math.max(0, Math.min(255, Math.round(value)));
+    return clamped.toString(16).padStart(2, '0');
+}
+
+function interpolateHexColor(start, end, factor) {
+    const from = hexToRgbComponents(start);
+    const to = hexToRgbComponents(end);
+    const mix = (a, b) => a + (b - a) * factor;
+    return `#${rgbToHexComponent(mix(from.r, to.r))}${rgbToHexComponent(mix(from.g, to.g))}${rgbToHexComponent(mix(from.b, to.b))}`;
+}
+
+function generateStageGradientPairs(count) {
+    if (!count) return [];
+    const startDark = '#0f172a';
+    const startBright = '#1d4ed8';
+    const endDark = '#2563eb';
+    const endBright = '#93c5fd';
+    if (count === 1) {
+        return [[startBright, endBright]];
+    }
+    return Array.from({ length: count }, (_, index) => {
+        const factor = count <= 1 ? 0 : index / (count - 1);
+        const from = interpolateHexColor(startDark, startBright, factor);
+        const to = interpolateHexColor(endDark, endBright, factor);
+        return [from, to];
+    });
 }
 
 // Juvo Blue Color Scheme
@@ -2516,6 +2581,56 @@ function postProcessDealFunnelLabels(context) {
     }
 }
 
+function applyDealFunnelGradients(context, gradients) {
+    if (!gradients || !gradients.length || context.showSecondary) return;
+    const graphEl = document.querySelector('#dealFunnelGraph .svg-funnel-js');
+    if (!graphEl) return;
+    const svg = graphEl.querySelector('svg');
+    if (!svg) return;
+
+    const ns = 'http://www.w3.org/2000/svg';
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+        defs = document.createElementNS(ns, 'defs');
+        svg.insertBefore(defs, svg.firstChild);
+    }
+
+    defs.querySelectorAll('[data-deal-funnel-gradient="true"]').forEach(node => node.remove());
+
+    const segmentPaths = Array.from(svg.querySelectorAll('.svg-funnel-js__container path'));
+    const PathCtor = typeof SVGPathElement !== 'undefined' ? SVGPathElement : null;
+    let gradientIndex = 0;
+    segmentPaths.forEach(path => {
+        if (PathCtor && !(path instanceof PathCtor)) return;
+        if (gradientIndex >= gradients.length) return;
+        const [start, end] = gradients[gradientIndex] || gradients[gradients.length - 1];
+        const gradientId = `dealFunnelGradient-${gradientIndex}`;
+        const gradientEl = document.createElementNS(ns, 'linearGradient');
+        gradientEl.setAttribute('id', gradientId);
+        gradientEl.setAttribute('data-deal-funnel-gradient', 'true');
+        gradientEl.setAttribute('x1', '0%');
+        gradientEl.setAttribute('y1', '0%');
+        gradientEl.setAttribute('x2', '0%');
+        gradientEl.setAttribute('y2', '100%');
+
+        const startStop = document.createElementNS(ns, 'stop');
+        startStop.setAttribute('offset', '0%');
+        startStop.setAttribute('stop-color', start || '#2563eb');
+
+        const endStop = document.createElementNS(ns, 'stop');
+        endStop.setAttribute('offset', '100%');
+        endStop.setAttribute('stop-color', end || start || '#60a5fa');
+
+        gradientEl.appendChild(startStop);
+        gradientEl.appendChild(endStop);
+        defs.appendChild(gradientEl);
+
+        path.setAttribute('fill', `url(#${gradientId})`);
+        path.setAttribute('stroke', 'none');
+        gradientIndex += 1;
+    });
+}
+
 function renderDealFlowFunnel(stageData, deadStageData = [], snapshot) {
     const wrapper = document.getElementById('dealFunnelContainer');
     const container = document.getElementById('dealFunnelGraph');
@@ -2568,14 +2683,15 @@ function renderDealFlowFunnel(stageData, deadStageData = [], snapshot) {
     const parentWidth = container.parentElement ? container.parentElement.clientWidth : 0;
     const width = Math.max(parentWidth || container.clientWidth || container.offsetWidth || 360, 360);
     const height = Math.max(context.preparedStages.length * 140, 420);
+    container.style.minHeight = `${height}px`;
+    container.style.height = `${height}px`;
 
     let colors;
     if (context.showSecondary) {
         const palette = ['#0f172a', '#1e3a8a', '#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'];
         colors = context.subLabels.map((_, index) => palette[index % palette.length]);
     } else {
-        const gradientStops = ['#0f172a', '#1e3a8a', '#2563eb', '#60a5fa'];
-        colors = context.preparedStages.map(() => gradientStops);
+        colors = generateStageGradientPairs(context.preparedStages.length);
     }
 
     const data = {
@@ -2588,7 +2704,7 @@ function renderDealFlowFunnel(stageData, deadStageData = [], snapshot) {
         data.subLabels = context.subLabels;
     }
 
-    dealFunnelGraphInstance = new FunnelGraph({
+    const funnelOptions = {
         container: '#dealFunnelGraph',
         gradientDirection: 'vertical',
         data,
@@ -2597,9 +2713,14 @@ function renderDealFlowFunnel(stageData, deadStageData = [], snapshot) {
         width,
         height,
         subLabelValue: 'percent'
-    });
+    };
+    if (!context.showSecondary && Array.isArray(colors) && colors.length) {
+        funnelOptions.color = colors[0];
+    }
+    dealFunnelGraphInstance = new FunnelGraph(funnelOptions);
     dealFunnelGraphInstance.draw();
     postProcessDealFunnelLabels(context);
+    applyDealFunnelGradients(context, Array.isArray(colors[0]) ? colors : null);
 }
 
 function handleDealFunnelResize() {

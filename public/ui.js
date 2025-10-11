@@ -16,6 +16,7 @@
     cardGoal: qs('#card-goal'),
     cardStageMetrics: qs('#card-stage-metrics'),
     list: qs('#view-list'),
+    dealflow: qs('#view-dealflow'),
   };
 
   function setActiveNav(view) {
@@ -35,6 +36,7 @@
     if (el.homeStats) el.homeStats.classList.add('hidden');
     if (el.goal) el.goal.classList.add('hidden');
     if (el.list) el.list.classList.add('hidden');
+    if (el.dealflow) el.dealflow.classList.add('hidden');
 
     // default: hide all cards
     [el.cardFunnel, el.cardStages, el.cardGoal, el.cardStageMetrics].forEach(c => c && c.classList.add('hidden'));
@@ -52,6 +54,10 @@
       case 'list':
         if (el.list) el.list.classList.remove('hidden');
         if (window.renderListView) window.renderListView();
+        break;
+      case 'dealflow':
+        if (el.dealflow) el.dealflow.classList.remove('hidden');
+        setTimeout(() => { if (window.renderDealFlowView) window.renderDealFlowView(); }, 0);
         break;
       case 'funnel':
         if (el.home) el.home.classList.remove('hidden');
